@@ -74,13 +74,11 @@ Board selection in Arduino IDE (if you prefer): **ESP32S3 Dev Module**, flash 16
 
 ## Controls
 
-| Action | Result |
-|--------|--------|
-| BOOT short press | Main → USB-C → USB-A → Main |
-| BOOT double tap | On detail → Main; on Main → **clear session** |
-| BOOT long press | Toggle backlight fully off/on |
-| Idle 60s on C/A page | Auto-return to Main |
-| Idle 45s (any page) | Dim backlight (night mode) |
+- **Short press:** zoom cycle — Main → USB-C → Main → USB-A → Main → Session stats → Main
+- **Long press:** clear session history (new connection)
+- **Idle dim:** after 90s, backlight to 50% (any press restores)
+
+USB-C/A pages show a session-length sparkline (grows / rebins to fit) with a time span label.
 
 
 ## Wi‑Fi / MQTT (Home Assistant)
