@@ -88,12 +88,13 @@ USB-C/A pages show a session-length sparkline (grows / rebins to fit) with a tim
 2. Fill `WIFI_*` and `MQTT_*` (broker can be HA’s Mosquitto / Tailscale IP)
 3. Rebuild & flash
 
-Published (retained) under `MQTT_BASE` (default `geek/sw3518`):
+Not ESPHome — after Mosquitto is up, the GEEK publishes **Home Assistant MQTT discovery** and should appear as device **SW3518 GEEK** under Settings → Devices & services → MQTT.
 
-`vin`, `vout`, `i_c`, `i_a`, `power`, `protocol`, `session_mwh`, `session_peak_w`
+State topics (retained) under `MQTT_BASE` (default `geek/sw3518`):
 
-This is **not** an ESPHome device — it will not show up under ESPHome.
-It publishes MQTT topics only. In HA use **MQTT** sensors/entities for `geek/sw3518/...` (Settings → Devices & services → MQTT), or add MQTT discovery later.
+`vin`, `vout`, `i_c`, `i_a`, `power`, `power_c`, `power_a`, `protocol`, `session_mwh`, `session_peak_w`, `charging`, `status` (`online`/`offline` LWT)
+
+Discovery prefix defaults to `homeassistant` (override with `MQTT_DISCOVERY_PREFIX` in `secrets.h`).
 
 ## TF card logging
 
