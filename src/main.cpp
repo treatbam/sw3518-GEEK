@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
+#include <esp_system.h>
 #include <OneButton.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -348,21 +349,35 @@ static void logSd(uint32_t now) {
 }
 
 void setup() {
-  Serial.begin(115200);
-  delay(300);
-  Serial.println("ESP32-S3-GEEK SW3518 stats");
-
+  // Alive before USB/TFT: backlight blinks even if CDC or LCD init fails.
   pinMode(PIN_TFT_BL, OUTPUT);
+  for (int i = 0; i < 4; ++i) {
+    digitalWrite(PIN_TFT_BL, HIGH);
+    delay(80);
+    digitalWrite(PIN_TFT_BL, LOW);
+    delay(80);
+  }
   digitalWrite(PIN_TFT_BL, HIGH);
+
+  Serial.begin(115200);
+  // TinyUSB CDC: wait briefly for host monitor, then continue anyway.
+  const uint32_t serialDeadline = millis() + 3000;
+  while (!Serial && millis() < serialDeadline) {
+    delay(10);
+  }
+  Serial.println();
+  Serial.println("ESP32-S3-GEEK SW3518 stats");
+  Serial.printf("USB_MODE TinyUSB CDC, reset reason %u\n", (unsigned)esp_reset_reason());
 
   Serial.println("TFT init...");
   tft.init();
-  tft.setRotation(1);
+  // Waveshare/espp landscape inverted ≈ rotation 3 on many ST7789 panels.
+  tft.setRotation(3);
   tft.setTextFont(2);
   tft.fillScreen(TFT_RED);
-  delay(150);
+  delay(200);
   tft.fillScreen(TFT_GREEN);
-  delay(150);
+  delay(200);
   tft.fillScreen(TFT_BLACK);
   Serial.printf("TFT %dx%d\n", tft.width(), tft.height());
   digitalWrite(PIN_TFT_BL, HIGH);

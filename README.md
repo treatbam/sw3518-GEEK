@@ -110,3 +110,12 @@ Firmware is written for desk verification. After you solder/plug the SW3518, con
 ## License
 
 Firmware in this repo: MIT (unless you later vendor GPL code — keep attributions). SW3518 is a product of Zhuhai iSmartWare; datasheets are theirs.
+
+## Blank screen / silent serial
+
+1. Hold **BOOT**, plug USB-A, release BOOT, then `pio run -e esp32-s3-geek -t upload`.
+2. **Unplug and replug** after upload (Waveshare CDC tip) so the app USB device re-enumerates.
+3. Monitor: `pio device monitor -b 115200` — you should see `ESP32-S3-GEEK SW3518 stats`.
+4. On boot the backlight should **blink 4 times** even before the LCD init. No blink ⇒ firmware not running / wrong board / flash failed.
+5. This build uses TinyUSB CDC (`ARDUINO_USB_MODE=0`) on the USB-A port (GPIO19/20).
+
