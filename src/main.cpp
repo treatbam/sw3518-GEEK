@@ -377,14 +377,33 @@ void setup() {
   }
   logLine("");
   logLine("ESP32-S3-GEEK SW3518 stats");
-  Serial.printf("CDC + UART0, reset reason %u\n", (unsigned)esp_reset_reason());
-  UartDbg.printf("CDC + UART0, reset reason %u\n", (unsigned)esp_reset_reason());
+  const int rr = (int)esp_reset_reason();
+  const char* rrs = "?";
+  switch (rr) {
+    case 1: rrs = "POWERON"; break;
+    case 3: rrs = "SW"; break;
+    case 4: rrs = "PANIC"; break;
+    case 5: rrs = "INT_WDT"; break;
+    case 6: rrs = "TASK_WDT"; break;
+    case 7: rrs = "WDT"; break;
+    case 9: rrs = "BROWNOUT"; break;
+    default: break;
+  }
+  Serial.printf("CDC + UART0, reset %d (%s)\n", rr, rrs);
+  UartDbg.printf("CDC + UART0, reset %d (%s)\n", rr, rrs);
 
   Serial.println("TFT init...");
   Serial.flush();
-  // Match Waveshare 08_SD_LCD demo: begin + rotation 1 (landscape 240x135)
+  UartDbg.println("TFT init...");
+  // begin() panicked with TFT_SDA_READ / PSRAM — step carefully
+  Serial.println("tft.begin()...");
+  Serial.flush();
   tft.begin();
+  Serial.println("tft.begin() ok");
+  Serial.flush();
   tft.setRotation(1);
+  Serial.println("rotation ok");
+  Serial.flush();
   tft.setSwapBytes(true);
   tft.setTextFont(2);
   if (TFT_BL >= 0) {
