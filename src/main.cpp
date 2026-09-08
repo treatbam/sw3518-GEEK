@@ -246,6 +246,20 @@ static void onBootLong() {
   anim.kind = Anim::Idle;
 }
 
+static void onBootDouble() {
+  touchActivity();
+  if (anim.busy()) return;
+  if (page == Page::History) {
+    startZoom(Anim::ZoomOut, Page::History, Page::Main);
+  } else if (page == Page::Main) {
+    startZoom(Anim::ZoomIn, Page::Main, Page::History);
+  } else {
+    // From a port page: jump straight to session stats
+    anim.kind = Anim::Idle;
+    page = Page::History;
+  }
+}
+
 static void finishAnim(uint32_t now) {
   if (!anim.busy()) return;
   if (anim.rawT(now) < 1.f) return;
@@ -548,6 +562,7 @@ void setup() {
   tft.fillScreen(COL_BLACK);
 
   bootBtn.attachClick(onBootClick);
+  bootBtn.attachDoubleClick(onBootDouble);
   bootBtn.attachLongPressStart(onBootLong);
   bootBtn.setLongPressIntervalMs(800);
   lastActivityMs = millis();

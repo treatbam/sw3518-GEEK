@@ -75,6 +75,7 @@ Board selection in Arduino IDE (if you prefer): **ESP32S3 Dev Module**, flash 16
 ## Controls
 
 - **Short press:** zoom cycle — Main → USB-C → Main → USB-A → Main → Session stats → Main
+- **Double-tap:** jump to Session stats (again to return to Main)
 - **Long press:** clear session history (new connection)
 - **Idle dim:** after 90s, backlight to 50% (any press restores)
 
@@ -91,7 +92,8 @@ Published (retained) under `MQTT_BASE` (default `geek/sw3518`):
 
 `vin`, `vout`, `i_c`, `i_a`, `power`, `protocol`, `session_mwh`, `session_peak_w`
 
-In HA, create MQTT sensors from those topics (or use MQTT discovery later).
+This is **not** an ESPHome device — it will not show up under ESPHome.
+It publishes MQTT topics only. In HA use **MQTT** sensors/entities for `geek/sw3518/...` (Settings → Devices & services → MQTT), or add MQTT discovery later.
 
 ## TF card logging
 
