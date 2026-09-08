@@ -4,9 +4,11 @@ Live USB charger stats on a [Waveshare ESP32-S3-GEEK](https://www.waveshare.com/
 
 ## What you get
 
-- Overview page: total watts, Vin / Vout, Type-C and Type-A current & power
-- Detail page: millivolt / milliamp numbers
-- BOOT button: short press = switch pages, long press = backlight on/off
+- **Main**: total W, Vin/Vout, C/A amps+watts, and active fast-charge **protocol** (from SW3518 `0x06`)
+- **USB-C page**: big V/A/W + power sparkline
+- **USB-A page**: same for the A port
+- BOOT: short press cycles Main → USB-C → USB-A → Main; double-tap returns home; long press toggles backlight
+- After **60 seconds** on a detail page, auto-returns to Main
 - Serial monitor at `115200` with the same readings
 
 ## Wiring (GEEK 4-pin I2C header → SW3518)
@@ -49,6 +51,7 @@ The PCB schematic breaks the I2C header out on **GPIO16 / GPIO17**. Some Wavesha
   - `3` Type-A current (2.5 mA/step)
   - `4` Type-C current (2.5 mA/step)
 - Read 12-bit latch: **`0x3B`** (high 8) + **`0x3C`** (low 4) → `raw = (H << 4) | (L & 0x0F)`
+- Protocol status: **`0x06`** `fcx_ind` (QC2/QC3/FCP/SCP/PD FIX/PD PPS/…); bits 5-4 = PD 2.0/3.0 when applicable
 
 Driver lives in `include/sw3518.h` + `src/sw3518.cpp` (minimal ADC path; register notes from iSmartWare datasheet / RG003).
 
@@ -68,8 +71,10 @@ Board selection in Arduino IDE (if you prefer): **ESP32S3 Dev Module**, flash 16
 
 | Action | Result |
 |--------|--------|
-| BOOT short press | Toggle overview ↔ detail |
+| BOOT short press | Main → USB-C → USB-A → Main |
+| BOOT double tap | Jump back to Main |
 | BOOT long press | Toggle backlight |
+| Idle 60s on C/A page | Auto-return to Main |
 
 ## Repo status
 

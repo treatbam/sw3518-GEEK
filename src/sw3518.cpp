@@ -1,6 +1,7 @@
 #include "sw3518.h"
 
 namespace {
+constexpr uint8_t REG_FCX_STATUS = 0x06;
 constexpr uint8_t REG_I2C_CTRL = 0x13;
 constexpr uint8_t REG_ADC_TYPE = 0x3A;
 constexpr uint8_t REG_ADC_H = 0x3B;
@@ -16,9 +17,7 @@ bool SW3518::begin(int sda, int scl, uint32_t hz) {
   wire_.begin(sda, scl, hz);
   delay(20);
   present_ = probe();
-  if (present_) {
-    enableVinAdc();
-  }
+  if (present_) enableVinAdc();
   return present_;
 }
 
@@ -44,7 +43,6 @@ bool SW3518::readReg(uint8_t reg, uint8_t& val) {
 }
 
 bool SW3518::enableVinAdc() {
-  // Bit 1 of I2C_CTRL: reg_adc_vin_enable (per RG003). Read-modify-write.
   uint8_t ctrl = 0;
   if (!readReg(REG_I2C_CTRL, ctrl)) return false;
   ctrl |= 0x02;
@@ -53,7 +51,7 @@ bool SW3518::enableVinAdc() {
 
 bool SW3518::readAdc(uint8_t type, uint16_t& raw) {
   if (!writeReg(REG_ADC_TYPE, type)) return false;
-  delay(2);  // latch settle
+  delay(2);
   uint8_t hi = 0, lo = 0;
   if (!readReg(REG_ADC_H, hi)) return false;
   if (!readReg(REG_ADC_L, lo)) return false;
@@ -64,21 +62,21 @@ bool SW3518::readAdc(uint8_t type, uint16_t& raw) {
 bool SW3518::readVinMv(uint16_t& out) {
   uint16_t raw = 0;
   if (!readAdc(ADC_VIN, raw)) return false;
-  out = raw * 10;  // 10 mV/step
+  out = raw * 10;
   return true;
 }
 
 bool SW3518::readVoutMv(uint16_t& out) {
   uint16_t raw = 0;
   if (!readAdc(ADC_VOUT, raw)) return false;
-  out = raw * 6;  // 6 mV/step
+  out = raw * 6;
   return true;
 }
 
 bool SW3518::readIoutAMa(uint16_t& out) {
   uint16_t raw = 0;
   if (!readAdc(ADC_IOUT_A, raw)) return false;
-  out = (raw * 25) / 10;  // 2.5 mA/step
+  out = (raw * 25) / 10;
   return true;
 }
 
@@ -89,12 +87,44 @@ bool SW3518::readIoutCMa(uint16_t& out) {
   return true;
 }
 
+bool SW3518::readProtocol(Protocol& out, uint8_t& pd_ver) {
+  uint8_t st = 0;
+  if (!readReg(REG_FCX_STATUS, st)) return false;
+  pd_ver = (st >> 4) & 0x03;
+  const uint8_t ind = st & 0x0F;
+  if (ind <= 0x0B) out = static_cast<Protocol>(ind);
+  else out = Protocol::Unknown;
+  return true;
+}
+
+const char* SW3518::protocolName(Protocol p) {
+  switch (p) {
+    case Protocol::None: return "5V/DCP";
+    case Protocol::QC2: return "QC2.0";
+    case Protocol::QC3: return "QC3.0";
+    case Protocol::FCP: return "FCP";
+    case Protocol::SCP: return "SCP";
+    case Protocol::PdFix: return "PD FIX";
+    case Protocol::PdPps: return "PD PPS";
+    case Protocol::PE11: return "PE1.1";
+    case Protocol::PE20: return "PE2.0";
+    case Protocol::LVDC: return "LVDC";
+    case Protocol::SFCP: return "SFCP";
+    case Protocol::AFC: return "AFC";
+    default: return "?";
+  }
+}
+
 bool SW3518::readSnapshot(Snapshot& s) {
   s.ok = false;
   if (!readVinMv(s.vin_mv)) return false;
   if (!readVoutMv(s.vout_mv)) return false;
   if (!readIoutAMa(s.ia_ma)) return false;
   if (!readIoutCMa(s.ic_ma)) return false;
+  if (!readProtocol(s.protocol, s.pd_ver)) {
+    s.protocol = Protocol::Unknown;
+    s.pd_ver = 0;
+  }
   s.power_a_w = (s.vout_mv / 1000.0f) * (s.ia_ma / 1000.0f);
   s.power_c_w = (s.vout_mv / 1000.0f) * (s.ic_ma / 1000.0f);
   s.power_total_w = s.power_a_w + s.power_c_w;
