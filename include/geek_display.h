@@ -15,6 +15,7 @@ static constexpr uint16_t COL_MAGENTA   = 0xF81F;
 static constexpr uint16_t COL_ORANGE    = 0xFD20;
 static constexpr uint16_t COL_DARKGREY  = 0x7BEF;
 static constexpr uint16_t COL_LIGHTGREY = 0xC618;
+static constexpr uint16_t COL_DIM       = 0x4208;  // very dim grey
 
 inline void gfxText(Adafruit_GFX& g, int16_t x, int16_t y, const char* s,
                     uint16_t fg, uint16_t bg, uint8_t size,
@@ -27,6 +28,33 @@ inline void gfxText(Adafruit_GFX& g, int16_t x, int16_t y, const char* s,
   else if (right) x = x - tw;
   g.setCursor(x, y);
   g.print(s);
+}
+
+// Wi-Fi arcs + MQTT diamond + WWW glyph. Colors: bright vs dim.
+inline void drawWifiIcon(Adafruit_GFX& g, int16_t x, int16_t y, int bars, uint16_t on, uint16_t off) {
+  // bars 0..4 (0 = disconnected)
+  for (int i = 0; i < 4; i++) {
+    uint16_t c = (bars > i) ? on : off;
+    int h = 2 + i * 2;
+    g.fillRect(x + i * 3, y + 8 - h, 2, h, c);
+  }
+}
+
+inline void drawMqttIcon(Adafruit_GFX& g, int16_t x, int16_t y, bool ok, uint16_t on, uint16_t off) {
+  uint16_t c = ok ? on : off;
+  g.fillCircle(x + 4, y + 5, 2, c);
+  g.drawCircle(x + 4, y + 5, 4, c);
+}
+
+inline void drawWebIcon(Adafruit_GFX& g, int16_t x, int16_t y, bool active, uint16_t on, uint16_t off) {
+  uint16_t c = active ? on : off;
+  g.drawCircle(x + 5, y + 5, 4, c);
+  g.drawLine(x + 1, y + 5, x + 9, y + 5, c);
+  g.drawLine(x + 5, y + 1, x + 5, y + 9, c);
+  // tiny "W" cue
+  g.drawPixel(x + 3, y + 7, c);
+  g.drawPixel(x + 5, y + 6, c);
+  g.drawPixel(x + 7, y + 7, c);
 }
 
 class GeekDisplay : public Adafruit_ST7789 {

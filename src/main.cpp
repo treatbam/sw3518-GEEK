@@ -2,6 +2,7 @@
 #include <esp_system.h>
 #include <OneButton.h>
 #include <WiFi.h>
+#include <WebServer.h>
 #include <PubSubClient.h>
 #include <SPI.h>
 #include <SD.h>
@@ -39,7 +40,11 @@ SW3518 charger;
 OneButton bootBtn(PIN_BOOT_BTN, true, true);
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
+WebServer web(80);
 SPIClass* sdSpi = nullptr;
+uint32_t lastWebHitMs = 0;
+static constexpr uint32_t kWebActiveMs = 8000;
+bool webStarted = false;
 
 bool nightDim = false;
 int blLevel = kBlFull;
@@ -270,6 +275,44 @@ static void finishAnim(uint32_t now) {
   anim.kind = Anim::Idle;
 }
 
+
+static int wifiBars() {
+#if HAS_WIFI
+  if (WiFi.status() != WL_CONNECTED) return 0;
+  const int rssi = WiFi.RSSI();
+  if (rssi >= -55) return 4;
+  if (rssi >= -65) return 3;
+  if (rssi >= -75) return 2;
+  if (rssi >= -85) return 1;
+  return 1;
+#else
+  return 0;
+#endif
+}
+
+static bool webActive(uint32_t now) {
+  return lastWebHitMs != 0 && (now - lastWebHitMs) < kWebActiveMs;
+}
+
+static void drawConnIcons(Adafruit_GFX& g, int16_t rightX, int16_t y) {
+  const uint32_t now = millis();
+  const bool mqttOk =
+#if HAS_WIFI && defined(MQTT_HOST)
+      mqtt.connected();
+#else
+      false;
+#endif
+  const int bars = wifiBars();
+  const bool webOn = webActive(now);
+  // right-aligned cluster: [wifi][mqtt][web]
+  const int16_t xWeb = rightX - 12;
+  const int16_t xMqtt = xWeb - 14;
+  const int16_t xWifi = xMqtt - 16;
+  drawWifiIcon(g, xWifi, y, bars, COL_CYAN, COL_DIM);
+  drawMqttIcon(g, xMqtt, y, mqttOk, COL_GREEN, COL_DIM);
+  drawWebIcon(g, xWeb, y, webOn, COL_ORANGE, COL_DIM);
+}
+
 static void drawMissing() {
   frame.fillScreen(COL_BLACK);
   gfxText(frame, frame.width() / 2, frame.height() / 2 - 12, "SW3518 not found", COL_ORANGE,
@@ -283,8 +326,8 @@ static void drawMainChrome() {
   const int w = frame.width();
   gfxText(frame, 4, 2, "CHARGER", COL_CYAN, COL_BLACK, 1);
   const bool charging = snap.ia_ma > kLoadMa || snap.ic_ma > kLoadMa;
-  gfxText(frame, w - 4, 2, charging ? "CHG" : "IDLE", charging ? COL_GREEN : COL_DARKGREY, COL_BLACK,
-          1, false, true);
+  gfxText(frame, 70, 2, charging ? "CHG" : "IDLE", charging ? COL_GREEN : COL_DARKGREY, COL_BLACK, 1);
+  drawConnIcons(frame, w - 2, 1);
 
   const bool flash = millis() < protoFlashUntil;
   const char* proto = SW3518::protocolName(snap.protocol);
@@ -328,8 +371,8 @@ static void drawPortChrome(bool usbC, float alpha) {
   const float peakA = usbC ? session.peakC_A : session.peakA_A;
 
   gfxText(frame, 4, 2, usbC ? "USB-C" : "USB-A", accent, COL_BLACK, 1);
-  gfxText(frame, w - 4, 2, SW3518::protocolName(snap.protocol), COL_DARKGREY, COL_BLACK, 1, false,
-          true);
+  drawConnIcons(frame, w - 2, 1);
+  gfxText(frame, w / 2, 2, SW3518::protocolName(snap.protocol), COL_DARKGREY, COL_BLACK, 1, true);
 
   char buf[32];
   snprintf(buf, sizeof(buf), "%.2fW", watts);
@@ -348,30 +391,39 @@ static void drawPortChrome(bool usbC, float alpha) {
 
 static void drawHistoryPage() {
   frame.fillScreen(COL_BLACK);
+  const int w = frame.width();
   gfxText(frame, 4, 2, "SESSION", COL_CYAN, COL_BLACK, 1);
+  drawConnIcons(frame, w - 2, 1);
+
   char buf[40], dur[16];
   if (session.active || session.mwh > 0.01) {
     formatDuration(millis() - session.startMs, dur, sizeof(dur));
   } else {
     snprintf(dur, sizeof(dur), "--");
   }
-  gfxText(frame, frame.width() - 4, 2, dur, COL_LIGHTGREY, COL_BLACK, 1, false, true);
+  gfxText(frame, 4, 14, dur, COL_LIGHTGREY, COL_BLACK, 1);
 
+  // History panel uses Wh (HA-friendly); main strip still shows mWh
+  const float wh = session.mwh / 1000.0f;
   snprintf(buf, sizeof(buf), "%.1fW", session.peakW);
-  gfxText(frame, 8, 22, "PEAK W", COL_DARKGREY, COL_BLACK, 1);
-  gfxText(frame, 8, 36, buf, COL_WHITE, COL_BLACK, 2);
+  gfxText(frame, 4, 28, "PEAK", COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 40, buf, COL_WHITE, COL_BLACK, 2);
 
-  snprintf(buf, sizeof(buf), "%.0f", session.mwh);
-  gfxText(frame, 130, 22, "mWh", COL_DARKGREY, COL_BLACK, 1);
-  gfxText(frame, 130, 36, buf, COL_WHITE, COL_BLACK, 2);
+  snprintf(buf, sizeof(buf), "%.3fWh", wh);
+  gfxText(frame, 120, 28, "ENERGY", COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 120, 40, buf, COL_WHITE, COL_BLACK, 2);
 
-  snprintf(buf, sizeof(buf), "C %.2fA / %.1fW", session.peakC_A, session.peakC_W);
-  gfxText(frame, 8, 70, buf, COL_YELLOW, COL_BLACK, 1);
-  snprintf(buf, sizeof(buf), "A %.2fA / %.1fW", session.peakA_A, session.peakA_W);
-  gfxText(frame, 8, 86, buf, COL_MAGENTA, COL_BLACK, 1);
+  snprintf(buf, sizeof(buf), "C pk %.2fA %.1fW", session.peakC_A, session.peakC_W);
+  gfxText(frame, 4, 64, buf, COL_YELLOW, COL_BLACK, 1);
+  drawSparkline(frame, 4, 76, 110, 22, histC, COL_YELLOW);
+
+  snprintf(buf, sizeof(buf), "A pk %.2fA %.1fW", session.peakA_A, session.peakA_W);
+  gfxText(frame, 122, 64, buf, COL_MAGENTA, COL_BLACK, 1);
+  drawSparkline(frame, 122, 76, 110, 22, histA, COL_MAGENTA);
+
   snprintf(buf, sizeof(buf), "Vout pk %.2fV", session.peakVoutMv / 1000.0f);
-  gfxText(frame, 8, 102, buf, COL_LIGHTGREY, COL_BLACK, 1);
-  gfxText(frame, 8, 118, "long-hold = new session", COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 104, buf, COL_LIGHTGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 118, "long-hold = new session", COL_DARKGREY, COL_BLACK, 1);
 }
 
 static void drawFrame(uint32_t now) {
@@ -548,7 +600,8 @@ static void publishHaDiscovery() {
   discSensor("power", "Total power", "power", "W", "power", "measurement");
   discSensor("power_c", "USB-C power", "power_c", "W", "power", "measurement");
   discSensor("power_a", "USB-A power", "power_a", "W", "power", "measurement");
-  discSensor("session_mwh", "Session energy", "session_mwh", "mWh", "energy", "total_increasing");
+  discSensor("session_wh", "Session energy", "session_wh", "Wh", "energy", "total_increasing");
+  discSensor("session_mwh", "Session energy mWh", "session_mwh", "mWh", "", "measurement");
   discSensor("session_peak_w", "Session peak power", "session_peak_w", "W", "power", "measurement");
   discText("protocol", "Charge protocol", "protocol");
   discBinary("charging", "Charging", "charging");
@@ -614,11 +667,85 @@ static void publishMqtt() {
   pub("protocol", SW3518::protocolName(snap.protocol));
   snprintf(val, sizeof(val), "%.1f", session.mwh);
   pub("session_mwh", val);
+  snprintf(val, sizeof(val), "%.4f", session.mwh / 1000.0f);
+  pub("session_wh", val);
   snprintf(val, sizeof(val), "%.2f", session.peakW);
   pub("session_peak_w", val);
   const bool charging = snap.ia_ma > kLoadMa || snap.ic_ma > kLoadMa;
   pub("charging", charging ? "ON" : "OFF");
   mqtt.publish(mqttAvailTopic, "online", true);
+#endif
+}
+
+
+static void noteWebHit() { lastWebHitMs = millis(); }
+
+static void handleRoot() {
+  noteWebHit();
+  char page[1200];
+  const bool charging = snap.ia_ma > kLoadMa || snap.ic_ma > kLoadMa;
+  snprintf(page, sizeof(page),
+           "<!doctype html><html><head><meta charset=utf-8>"
+           "<meta http-equiv=refresh content=2>"
+           "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
+           "<title>SW3518 GEEK</title>"
+           "<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:1.2rem}"
+           "h1{font-size:1.2rem;color:#0ff} .g{color:#8f8} .card{background:#1c1c1c;padding:1rem;"
+           "border-radius:10px;margin:.6rem 0} b{color:#fff}</style></head><body>"
+           "<h1>SW3518 GEEK</h1>"
+           "<div class=card><b>%.2f W</b> total &nbsp; %s<br>"
+           "in %.2f V &nbsp; out %.2f V<br>"
+           "USB-C %.2f A / %.2f W<br>"
+           "USB-A %.2f A / %.2f W<br>"
+           "protocol %s<br>"
+           "session %.0f mWh (%.3f Wh) &nbsp; peak %.1f W</div>"
+           "<div class=card class=g>MQTT %s &nbsp; Wi‑Fi %s (%d dBm)</div>"
+           "<p style=color:#666>Auto-refresh 2s — icon on device lights while you are here.</p>"
+           "</body></html>",
+           snap.power_total_w, charging ? "CHARGING" : "IDLE", snap.vin_mv / 1000.0f,
+           snap.vout_mv / 1000.0f, snap.ic_ma / 1000.0f, snap.power_c_w, snap.ia_ma / 1000.0f,
+           snap.power_a_w, SW3518::protocolName(snap.protocol), session.mwh, session.mwh / 1000.0f,
+           session.peakW,
+#if HAS_WIFI && defined(MQTT_HOST)
+           mqtt.connected() ? "up" : "down",
+#else
+           "n/a",
+#endif
+#if HAS_WIFI
+           WiFi.status() == WL_CONNECTED ? "up" : "down",
+           WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0
+#else
+           "n/a", 0
+#endif
+  );
+  web.send(200, "text/html", page);
+}
+
+static void handleApi() {
+  noteWebHit();
+  char json[384];
+  snprintf(json, sizeof(json),
+           "{\"vin\":%.3f,\"vout\":%.3f,\"i_c\":%.3f,\"i_a\":%.3f,\"power\":%.3f,"
+           "\"power_c\":%.3f,\"power_a\":%.3f,\"protocol\":\"%s\","
+           "\"session_mwh\":%.1f,\"session_wh\":%.4f,\"peak_w\":%.2f}",
+           snap.vin_mv / 1000.0f, snap.vout_mv / 1000.0f, snap.ic_ma / 1000.0f, snap.ia_ma / 1000.0f,
+           snap.power_total_w, snap.power_c_w, snap.power_a_w, SW3518::protocolName(snap.protocol),
+           session.mwh, session.mwh / 1000.0f, session.peakW);
+  web.send(200, "application/json", json);
+}
+
+static void setupWeb() {
+#if HAS_WIFI
+  if (webStarted) return;
+  web.on("/", handleRoot);
+  web.on("/api", handleApi);
+  web.onNotFound([]() {
+    noteWebHit();
+    web.send(404, "text/plain", "not found");
+  });
+  web.begin();
+  webStarted = true;
+  Serial.println("Web server :80");
 #endif
 }
 
@@ -707,6 +834,10 @@ void loop() {
   }
 
   if (wifiEnabled) {
+    if (WiFi.status() == WL_CONNECTED) {
+      setupWeb();
+      web.handleClient();
+    }
     ensureMqtt();
     mqtt.loop();
   }

@@ -92,9 +92,13 @@ Not ESPHome — after Mosquitto is up, the GEEK publishes **Home Assistant MQTT 
 
 State topics (retained) under `MQTT_BASE` (default `geek/sw3518`):
 
-`vin`, `vout`, `i_c`, `i_a`, `power`, `power_c`, `power_a`, `protocol`, `session_mwh`, `session_peak_w`, `charging`, `status` (`online`/`offline` LWT)
+`vin`, `vout`, `i_c`, `i_a`, `power`, `power_c`, `power_a`, `protocol`, `session_mwh`, `session_wh` (Wh for HA Energy), `session_peak_w`, `charging`, `status` (`online`/`offline` LWT)
 
 Discovery prefix defaults to `homeassistant` (override with `MQTT_DISCOVERY_PREFIX` in `secrets.h`).
+
+## Web UI
+
+With Wi‑Fi up, open `http://<device-ip>/` (JSON at `/api`). While a browser is hitting it, the on-screen **web** icon goes bright (Wi‑Fi bars + MQTT diamond sit beside it).
 
 ## TF card logging
 
