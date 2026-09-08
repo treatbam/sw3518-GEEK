@@ -3,6 +3,9 @@
 namespace {
 constexpr uint8_t REG_FCX_STATUS = 0x06;
 constexpr uint8_t REG_I2C_CTRL = 0x13;
+constexpr uint8_t REG_ADC_VIN_H = 0x30;
+constexpr uint8_t REG_ADC_VOUT_H = 0x31;
+constexpr uint8_t REG_ADC_VIN_VOUT_L = 0x32;
 constexpr uint8_t REG_ADC_TYPE = 0x3A;
 constexpr uint8_t REG_ADC_H = 0x3B;
 constexpr uint8_t REG_ADC_L = 0x3C;
@@ -12,13 +15,19 @@ constexpr uint8_t ADC_VOUT = 2;
 // Datasheet labels vs this board: user observed A/C swapped at types 3/4.
 constexpr uint8_t ADC_IOUT_A = 4;
 constexpr uint8_t ADC_IOUT_C = 3;
+
+// REG 0x13 bit1: Vin ADC must be enabled or Vin reads as 0 (RG003).
+constexpr uint8_t I2C_CTRL_VIN_ADC_EN = 0x02;
 }  // namespace
 
 bool SW3518::begin(int sda, int scl, uint32_t hz) {
   wire_.begin(sda, scl, hz);
   delay(20);
   present_ = probe();
-  if (present_) enableVinAdc();
+  if (present_) {
+    enableVinAdc();
+    delay(5);
+  }
   return present_;
 }
 
@@ -44,10 +53,9 @@ bool SW3518::readReg(uint8_t reg, uint8_t& val) {
 }
 
 bool SW3518::enableVinAdc() {
-  uint8_t ctrl = 0;
-  if (!readReg(REG_I2C_CTRL, ctrl)) return false;
-  ctrl |= 0x02;
-  return writeReg(REG_I2C_CTRL, ctrl);
+  // Absolute write matches happyme531 / VFDclock; RMW can leave enable clear
+  // if a prior read failed. Bit0 is one-shot PDO rebroadcast — leave it 0.
+  return writeReg(REG_I2C_CTRL, I2C_CTRL_VIN_ADC_EN);
 }
 
 bool SW3518::readAdc(uint8_t type, uint16_t& raw) {
@@ -61,6 +69,23 @@ bool SW3518::readAdc(uint8_t type, uint16_t& raw) {
 }
 
 bool SW3518::readVinMv(uint16_t& out) {
+  // Datasheet: Vin ADC only updates while REG0x13 bit1 is set.
+  // Re-arm every read — some modules drop the bit after latch/other writes.
+  enableVinAdc();
+  delay(2);
+
+  // Prefer continuous Vin/Vout registers (default path in h1_SW35xx).
+  uint8_t vin_h = 0, vin_vout_l = 0;
+  if (readReg(REG_ADC_VIN_H, vin_h) && readReg(REG_ADC_VIN_VOUT_L, vin_vout_l)) {
+    const uint16_t raw =
+        (static_cast<uint16_t>(vin_h) << 4) | static_cast<uint16_t>(vin_vout_l >> 4);
+    if (raw != 0) {
+      out = raw * 10;  // 10 mV/LSB
+      return true;
+    }
+  }
+
+  // Fall back to type-latch buffer (ADC type 1).
   uint16_t raw = 0;
   if (!readAdc(ADC_VIN, raw)) return false;
   out = raw * 10;
