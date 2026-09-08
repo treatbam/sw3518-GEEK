@@ -43,6 +43,9 @@ PubSubClient mqtt(wifiClient);
 WebServer web(80);
 SPIClass* sdSpi = nullptr;
 uint32_t lastWebHitMs = 0;
+uint32_t ipShowUntilMs = 0;  // show IP near icons until this time
+bool seenUsbC = false;
+bool seenUsbA = false;
 static constexpr uint32_t kWebActiveMs = 8000;
 bool webStarted = false;
 
@@ -270,6 +273,14 @@ static void finishAnim(uint32_t now) {
   if (anim.rawT(now) < 1.f) return;
   page = anim.to;
   if (anim.kind == Anim::ZoomOut) {
+    if (anim.from == Page::UsbC) seenUsbC = true;
+    if (anim.from == Page::UsbA) seenUsbA = true;
+    // Full C then A rotation complete → flash IP 10s by the status icons
+    if (seenUsbC && seenUsbA && anim.from == Page::UsbA) {
+      ipShowUntilMs = now + 10000;
+      seenUsbC = false;
+      seenUsbA = false;
+    }
     nextFromMain = (nextFromMain + 1) % 3;
   }
   anim.kind = Anim::Idle;
@@ -308,7 +319,7 @@ static bool webActive(uint32_t now) {
   return lastWebHitMs != 0 && (now - lastWebHitMs) < kWebActiveMs;
 }
 
-static void drawConnIcons(Adafruit_GFX& g, int16_t rightX, int16_t y) {
+static void drawConnIcons(Adafruit_GFX& g, int16_t rightX, int16_t y, bool withIp = false) {
   const uint32_t now = millis();
   const bool mqttOk =
 #if HAS_WIFI && defined(MQTT_HOST)
@@ -325,6 +336,12 @@ static void drawConnIcons(Adafruit_GFX& g, int16_t rightX, int16_t y) {
   drawWifiIcon(g, xWifi, y, bars, COL_CYAN, COL_DIM);
   drawMqttIcon(g, xMqtt, y, mqttOk, COL_GREEN, COL_DIM);
   drawWebIcon(g, xWeb, y, webOn, COL_ORANGE, COL_DIM);
+  if (withIp && now < ipShowUntilMs) {
+    char ip[20];
+    ipText(ip, sizeof(ip));
+    // sit just left of the icon cluster
+    gfxText(g, xWifi - 4, y + 1, ip, COL_CYAN, COL_BLACK, 1, false, true);
+  }
 }
 
 static void drawMissing() {
@@ -338,10 +355,10 @@ static void drawMissing() {
 
 static void drawMainChrome() {
   const int w = frame.width();
-  gfxText(frame, 4, 2, "CHARGER", COL_CYAN, COL_BLACK, 1);
   const bool charging = snap.ia_ma > kLoadMa || snap.ic_ma > kLoadMa;
-  gfxText(frame, 70, 2, charging ? "CHG" : "IDLE", charging ? COL_GREEN : COL_DARKGREY, COL_BLACK, 1);
-  drawConnIcons(frame, w - 2, 1);
+  // Compact charge flag (left); icons (+ timed IP) on the right
+  gfxText(frame, 4, 2, charging ? "CHG" : "IDLE", charging ? COL_GREEN : COL_DARKGREY, COL_BLACK, 1);
+  drawConnIcons(frame, w - 2, 1, true);
 
   const bool flash = millis() < protoFlashUntil;
   const char* proto = SW3518::protocolName(snap.protocol);
@@ -365,17 +382,14 @@ static void drawMainChrome() {
   snprintf(buf, sizeof(buf), "%.2fA", snap.ia_ma / 1000.0f);
   gfxText(frame, w / 2 + 10, 78, buf, COL_WHITE, COL_BLACK, 1);
 
-  char ip[20];
-  ipText(ip, sizeof(ip));
   if (session.active || session.mwh > 0.01) {
     char dur[16];
     formatDuration(millis() - session.startMs, dur, sizeof(dur));
-    snprintf(buf, sizeof(buf), "%s  %.0fmWh", dur, session.mwh);
-    gfxText(frame, 4, 94, buf, COL_DARKGREY, COL_BLACK, 1);
+    snprintf(buf, sizeof(buf), "%s  pk %.0fW  %.0fmWh", dur, session.peakW, session.mwh);
   } else {
-    gfxText(frame, 4, 94, "idle - long-hold clears", COL_DARKGREY, COL_BLACK, 1);
+    snprintf(buf, sizeof(buf), "idle - long-hold clears");
   }
-  gfxText(frame, frame.width() - 4, 94, ip, COL_CYAN, COL_BLACK, 1, false, true);
+  gfxText(frame, 4, 94, buf, COL_DARKGREY, COL_BLACK, 1);
 }
 
 static void drawPortChrome(bool usbC, float alpha) {
@@ -388,7 +402,7 @@ static void drawPortChrome(bool usbC, float alpha) {
   const float peakA = usbC ? session.peakC_A : session.peakA_A;
 
   gfxText(frame, 4, 2, usbC ? "USB-C" : "USB-A", accent, COL_BLACK, 1);
-  drawConnIcons(frame, w - 2, 1);
+  drawConnIcons(frame, w - 2, 1, true);
   gfxText(frame, w / 2, 2, SW3518::protocolName(snap.protocol), COL_DARKGREY, COL_BLACK, 1, true);
 
   char buf[32];
@@ -400,29 +414,27 @@ static void drawPortChrome(bool usbC, float alpha) {
   snprintf(buf, sizeof(buf), "%.2fA pk%.2f", amps, peakA);
   gfxText(frame, w / 2 - 10, 48, buf, COL_WHITE, COL_BLACK, 1);
 
-  char span[24], label[36], ip[20];
+  char span[24], label[36];
   formatDuration(session.active ? (millis() - session.startMs) : histSpanMs(), span, sizeof(span));
   snprintf(label, sizeof(label), "span %s", span);
   gfxText(frame, 4, 62, label, COL_DARKGREY, COL_BLACK, 1);
-  ipText(ip, sizeof(ip));
-  gfxText(frame, frame.width() - 4, 62, ip, COL_CYAN, COL_BLACK, 1, false, true);
 }
 
 static void drawHistoryPage() {
   frame.fillScreen(COL_BLACK);
   const int w = frame.width();
   gfxText(frame, 4, 2, "SESSION", COL_CYAN, COL_BLACK, 1);
-  drawConnIcons(frame, w - 2, 1);
+  drawConnIcons(frame, w - 2, 1, false);
 
-  char buf[40], dur[16];
+  char buf[40], dur[16], ip[20];
   if (session.active || session.mwh > 0.01) {
     formatDuration(millis() - session.startMs, dur, sizeof(dur));
   } else {
     snprintf(dur, sizeof(dur), "--");
   }
-  char ip[20];
   ipText(ip, sizeof(ip));
   gfxText(frame, 4, 14, dur, COL_LIGHTGREY, COL_BLACK, 1);
+  // IP always available here (handy for the web UI)
   gfxText(frame, frame.width() - 4, 14, ip, COL_CYAN, COL_BLACK, 1, false, true);
 
   // History panel uses Wh (HA-friendly); main strip still shows mWh
@@ -833,6 +845,7 @@ void setup() {
   bootBtn.attachLongPressStart(onBootLong);
   bootBtn.setLongPressIntervalMs(800);
   lastActivityMs = millis();
+  ipShowUntilMs = millis() + 90000;  // IP hint for 90s after boot
 
   setupWifi();
   setupSd();
