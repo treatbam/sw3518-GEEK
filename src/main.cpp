@@ -24,6 +24,7 @@ static constexpr int kBlFull = 255;
 static constexpr int kBlDim = 40;
 
 GeekDisplay tft;
+GFXcanvas16 frame(240, 135);
 HardwareSerial UartDbg(0);
 
 static void logLine(const char* msg) {
@@ -164,21 +165,21 @@ static void pushHistory() {
   if (histCount < kHist) histCount++;
 }
 
-static void drawSparkline(int x, int y, int w, int h, const float* data, uint16_t color) {
+static void drawSparkline(Adafruit_GFX& g, int x, int y, int w, int h, const float* data, uint16_t color) {
   if (histCount < 2) return;
   float mx = 0.1f;
   for (size_t i = 0; i < histCount; i++) {
     const size_t idx = (histIdx + kHist - histCount + i) % kHist;
     if (data[idx] > mx) mx = data[idx];
   }
-  tft.drawRect(x, y, w, h, COL_DARKGREY);
+  g.drawRect(x, y, w, h, COL_DARKGREY);
   int prevX = x + 1, prevY = y + h - 2;
   const size_t denom = histCount > 1 ? histCount - 1 : 1;
   for (size_t i = 0; i < histCount; i++) {
     const size_t idx = (histIdx + kHist - histCount + i) % kHist;
     const int px = x + 1 + (int)((w - 3) * i / denom);
     const int py = y + h - 2 - (int)((h - 4) * (data[idx] / mx));
-    if (i > 0) tft.drawLine(prevX, prevY, px, py, color);
+    if (i > 0) g.drawLine(prevX, prevY, px, py, color);
     prevX = px;
     prevY = py;
   }
@@ -191,39 +192,40 @@ static void formatDuration(uint32_t ms, char* out, size_t n) {
 }
 
 static void drawMissing() {
-  tft.fillScreen(COL_BLACK);
-  tft.text(tft.W() / 2, tft.H() / 2 - 12, "SW3518 not found", COL_ORANGE, COL_BLACK, 1, true);
-  tft.text(tft.W() / 2, tft.H() / 2 + 4, "I2C 0x3C SDA16/SCL17", COL_DARKGREY, COL_BLACK, 1, true);
+  frame.fillScreen(COL_BLACK);
+  gfxText(frame, frame.width() / 2, frame.height() / 2 - 12, "SW3518 not found", COL_ORANGE, COL_BLACK, 1, true);
+  gfxText(frame, frame.width() / 2, frame.height() / 2 + 4, "I2C 0x3C SDA16/SCL17", COL_DARKGREY, COL_BLACK, 1, true);
+  tft.push(frame);
 }
 
 static void drawMain(uint32_t now) {
-  const int w = tft.W();
-  tft.fillScreen(COL_BLACK);
+  const int w = frame.width();
+  frame.fillScreen(COL_BLACK);
 
-  tft.text(4, 2, "CHARGER", COL_CYAN, COL_BLACK, 1);
+  gfxText(frame, 4, 2, "CHARGER", COL_CYAN, COL_BLACK, 1);
   const bool charging = snap.ia_ma > kLoadMa || snap.ic_ma > kLoadMa;
-  tft.text(w - 4, 2, charging ? "CHG" : "IDLE", charging ? COL_GREEN : COL_DARKGREY, COL_BLACK, 1, false, true);
+  gfxText(frame, w - 4, 2, charging ? "CHG" : "IDLE", charging ? COL_GREEN : COL_DARKGREY, COL_BLACK, 1, false, true);
 
   const bool flash = now < protoFlashUntil;
   const char* proto = SW3518::protocolName(snap.protocol);
-  if (flash) tft.fillRect(w / 2 - 50, 16, 100, 14, COL_YELLOW);
-  tft.text(w / 2, 18, proto, flash ? COL_BLACK : COL_YELLOW, flash ? COL_YELLOW : COL_BLACK, 1, true);
+  if (flash) frame.fillRect(w / 2 - 50, 16, 100, 14, COL_YELLOW);
+  gfxText(frame, w / 2, 18, proto, flash ? COL_BLACK : COL_YELLOW, flash ? COL_YELLOW : COL_BLACK, 1, true);
 
   char buf[40];
   snprintf(buf, sizeof(buf), "%.1fW", snap.power_total_w);
-  tft.text(w / 2, 34, buf, COL_WHITE, COL_BLACK, 2, true);
+  gfxText(frame, w / 2, 34, buf, COL_WHITE, COL_BLACK, 2, true);
 
   snprintf(buf, sizeof(buf), "in %.1fV", snap.vin_mv / 1000.0f);
-  tft.text(4, 62, buf, COL_LIGHTGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 62, buf, COL_LIGHTGREY, COL_BLACK, 1);
   snprintf(buf, sizeof(buf), "out %.2fV", snap.vout_mv / 1000.0f);
-  tft.text(w / 2, 62, buf, COL_LIGHTGREY, COL_BLACK, 1);
+  gfxText(frame, w / 2, 62, buf, COL_LIGHTGREY, COL_BLACK, 1);
 
-  tft.text(4, 78, "C", COL_YELLOW, COL_BLACK, 1);
+  gfxText(frame, 4, 78, "C", COL_YELLOW, COL_BLACK, 1);
   snprintf(buf, sizeof(buf), "%.2fA", snap.ic_ma / 1000.0f);
-  tft.text(14, 78, buf, COL_WHITE, COL_BLACK, 1);
-  tft.text(w / 2, 78, "A", COL_MAGENTA, COL_BLACK, 1);
+  gfxText(frame, 14, 78, buf, COL_WHITE, COL_BLACK, 1);
+  gfxText(frame, w / 2, 78, "A", COL_MAGENTA, COL_BLACK, 1);
   snprintf(buf, sizeof(buf), "%.2fA", snap.ia_ma / 1000.0f);
-  tft.text(w / 2 + 10, 78, buf, COL_WHITE, COL_BLACK, 1);
+  gfxText(frame, w / 2 + 10, 78, buf, COL_WHITE, COL_BLACK, 1);
 
   if (session.active || session.mwh > 0.01) {
     char dur[16];
@@ -232,32 +234,37 @@ static void drawMain(uint32_t now) {
   } else {
     snprintf(buf, sizeof(buf), "session -- dbl-tap clear");
   }
-  tft.text(4, 94, buf, COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 94, buf, COL_DARKGREY, COL_BLACK, 1);
 
-  drawSparkline(4, 106, w / 2 - 6, 26, histC, COL_YELLOW);
-  drawSparkline(w / 2 + 2, 106, w / 2 - 6, 26, histA, COL_MAGENTA);
+  drawSparkline(frame, 4, 106, w / 2 - 6, 26, histC, COL_YELLOW);
+  drawSparkline(frame, w / 2 + 2, 106, w / 2 - 6, 26, histA, COL_MAGENTA);
+  tft.push(frame);
 }
 
 static void drawPort(bool usbC) {
-  const int w = tft.W();
-  tft.fillScreen(COL_BLACK);
+  const int w = frame.width();
+  frame.fillScreen(COL_BLACK);
   const uint16_t accent = usbC ? COL_YELLOW : COL_MAGENTA;
   const float amps = (usbC ? snap.ic_ma : snap.ia_ma) / 1000.0f;
   const float watts = usbC ? snap.power_c_w : snap.power_a_w;
   const float* hist = usbC ? histC : histA;
   const float peakA = usbC ? session.peakC_A : session.peakA_A;
 
-  tft.text(4, 2, usbC ? "USB-C" : "USB-A", accent, COL_BLACK, 1);
-  tft.text(w - 4, 2, SW3518::protocolName(snap.protocol), COL_DARKGREY, COL_BLACK, 1, false, true);
+  gfxText(frame, 4, 2, usbC ? "USB-C" : "USB-A", accent, COL_BLACK, 1);
+  gfxText(frame, w - 4, 2, SW3518::protocolName(snap.protocol), COL_DARKGREY, COL_BLACK, 1, false, true);
 
   char buf[32];
-  snprintf(buf, sizeof(buf), "%.2f V", snap.vout_mv / 1000.0f);
-  tft.text(4, 20, buf, COL_WHITE, COL_BLACK, 2);
-  snprintf(buf, sizeof(buf), "%.2fA pk %.2fA", amps, peakA);
-  tft.text(4, 52, buf, COL_WHITE, COL_BLACK, 1);
+  // Large stat = power (was voltage)
   snprintf(buf, sizeof(buf), "%.2fW", watts);
-  tft.text(w / 2, 52, buf, COL_WHITE, COL_BLACK, 1);
-  drawSparkline(4, 76, w - 8, 54, hist, accent);
+  gfxText(frame, w / 2, 22, buf, COL_WHITE, COL_BLACK, 2, true);
+
+  snprintf(buf, sizeof(buf), "%.2fV", snap.vout_mv / 1000.0f);
+  gfxText(frame, 4, 52, buf, COL_LIGHTGREY, COL_BLACK, 1);
+  snprintf(buf, sizeof(buf), "%.2fA pk %.2fA", amps, peakA);
+  gfxText(frame, w / 2, 52, buf, COL_WHITE, COL_BLACK, 1);
+
+  drawSparkline(frame, 4, 76, w - 8, 54, hist, accent);
+  tft.push(frame);
 }
 
 static void setupWifi() {

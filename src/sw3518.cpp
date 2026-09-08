@@ -9,8 +9,9 @@ constexpr uint8_t REG_ADC_L = 0x3C;
 
 constexpr uint8_t ADC_VIN = 1;
 constexpr uint8_t ADC_VOUT = 2;
-constexpr uint8_t ADC_IOUT_A = 3;
-constexpr uint8_t ADC_IOUT_C = 4;
+// Datasheet labels vs this board: user observed A/C swapped at types 3/4.
+constexpr uint8_t ADC_IOUT_A = 4;
+constexpr uint8_t ADC_IOUT_C = 3;
 }  // namespace
 
 bool SW3518::begin(int sda, int scl, uint32_t hz) {
