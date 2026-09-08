@@ -69,9 +69,10 @@ size_t histCount = 0;
 uint32_t histPeriodMs = 250;
 
 struct Session {
-  bool active = false;
-  uint32_t startMs = 0;
+  bool active = false;       // load present right now (debounced off)
+  uint32_t startMs = 0;      // first load this session; 0 = empty
   uint32_t lastSampleMs = 0;
+  uint32_t chargedMs = 0;    // time with load only (for avg W / duration)
   double mwh = 0;
   float peakW = 0;
   float peakA = 0;
@@ -79,8 +80,18 @@ struct Session {
   float peakA_A = 0;
   float peakC_W = 0;
   float peakA_W = 0;
+  float peakC_W_A = 0;  // amps at C peak watts
+  float peakA_W_A = 0;  // amps at A peak watts
   uint16_t peakVoutMv = 0;
 } session;
+
+static constexpr uint32_t kSessionEndDebounceMs = 1500;
+
+static float sessionAvgW() {
+  if (session.chargedMs < 50 || session.mwh <= 0) return 0.f;
+  // avg W = mWh / hours = mWh * 3600 / ms
+  return static_cast<float>(session.mwh * 3600.0 / session.chargedMs);
+}
 
 struct Anim {
   enum Kind : uint8_t { Idle = 0, ZoomIn = 1, ZoomOut = 2 } kind = Idle;
@@ -146,22 +157,34 @@ static void clearSession() {
 
 static void updateSession(uint32_t now) {
   const bool load = (snap.ia_ma > kLoadMa) || (snap.ic_ma > kLoadMa);
+  static uint32_t loadGoneSince = 0;
+
   if (load) {
-    if (!session.active) {
-      session.active = true;
+    loadGoneSince = 0;
+    if (session.startMs == 0) {
+      // Fresh session (after boot or long-hold clear)
       session.startMs = now;
       session.lastSampleMs = now;
+      session.chargedMs = 0;
       session.mwh = 0;
       session.peakW = session.peakA = session.peakC_A = session.peakA_A = 0;
       session.peakC_W = session.peakA_W = 0;
+      session.peakC_W_A = session.peakA_W_A = 0;
       session.peakVoutMv = 0;
       histCount = 0;
       histPeriodMs = 250;
+    } else if (!session.active) {
+      // Resume after pause — skip idle gap for energy / chargedMs
+      session.lastSampleMs = now;
     } else {
-      const float dt_h = (now - session.lastSampleMs) / 3600000.0f;
+      const uint32_t dt = now - session.lastSampleMs;
+      const float dt_h = dt / 3600000.0f;
       session.mwh += snap.power_total_w * 1000.0f * dt_h;
+      session.chargedMs += dt;
       session.lastSampleMs = now;
     }
+    session.active = true;
+
     if (snap.power_total_w > session.peakW) session.peakW = snap.power_total_w;
     const float aTot = (snap.ia_ma + snap.ic_ma) / 1000.0f;
     if (aTot > session.peakA) session.peakA = aTot;
@@ -169,11 +192,27 @@ static void updateSession(uint32_t now) {
     const float aA = snap.ia_ma / 1000.0f;
     if (cA > session.peakC_A) session.peakC_A = cA;
     if (aA > session.peakA_A) session.peakA_A = aA;
-    if (snap.power_c_w > session.peakC_W) session.peakC_W = snap.power_c_w;
-    if (snap.power_a_w > session.peakA_W) session.peakA_W = snap.power_a_w;
+    if (snap.power_c_w > session.peakC_W) {
+      session.peakC_W = snap.power_c_w;
+      session.peakC_W_A = cA;
+    }
+    if (snap.power_a_w > session.peakA_W) {
+      session.peakA_W = snap.power_a_w;
+      session.peakA_W_A = aA;
+    }
     if (snap.vout_mv > session.peakVoutMv) session.peakVoutMv = snap.vout_mv;
   } else if (session.active) {
-    session.lastSampleMs = now;
+    // Close out the last loaded interval before stopping the clock
+    if (session.lastSampleMs && now > session.lastSampleMs) {
+      const uint32_t dt = now - session.lastSampleMs;
+      session.mwh += snap.power_total_w * 1000.0f * (dt / 3600000.0f);
+      session.chargedMs += dt;
+      session.lastSampleMs = now;
+    }
+    if (loadGoneSince == 0) loadGoneSince = now;
+    if (now - loadGoneSince >= kSessionEndDebounceMs) {
+      session.active = false;
+    }
   }
 }
 
@@ -382,10 +421,11 @@ static void drawMainChrome() {
   snprintf(buf, sizeof(buf), "%.2fA", snap.ia_ma / 1000.0f);
   gfxText(frame, w / 2 + 10, 78, buf, COL_WHITE, COL_BLACK, 1);
 
-  if (session.active || session.mwh > 0.01) {
+  if (session.startMs != 0 || session.mwh > 0.01) {
     char dur[16];
-    formatDuration(millis() - session.startMs, dur, sizeof(dur));
-    snprintf(buf, sizeof(buf), "%s  pk %.0fW  %.0fmWh", dur, session.peakW, session.mwh);
+    formatDuration(session.chargedMs, dur, sizeof(dur));
+    snprintf(buf, sizeof(buf), "%s  pk %.0fW avg %.0fW  %.0fmWh", dur, session.peakW,
+             sessionAvgW(), session.mwh);
   } else {
     snprintf(buf, sizeof(buf), "idle - long-hold clears");
   }
@@ -415,7 +455,7 @@ static void drawPortChrome(bool usbC, float alpha) {
   gfxText(frame, w / 2 - 10, 48, buf, COL_WHITE, COL_BLACK, 1);
 
   char span[24], label[36];
-  formatDuration(session.active ? (millis() - session.startMs) : histSpanMs(), span, sizeof(span));
+  formatDuration(session.startMs ? session.chargedMs : histSpanMs(), span, sizeof(span));
   snprintf(label, sizeof(label), "span %s", span);
   gfxText(frame, 4, 62, label, COL_DARKGREY, COL_BLACK, 1);
 }
@@ -427,8 +467,8 @@ static void drawHistoryPage() {
   drawConnIcons(frame, w - 2, 1, false);
 
   char buf[40], dur[16], ip[20];
-  if (session.active || session.mwh > 0.01) {
-    formatDuration(millis() - session.startMs, dur, sizeof(dur));
+  if (session.startMs != 0 || session.mwh > 0.01) {
+    formatDuration(session.chargedMs, dur, sizeof(dur));
   } else {
     snprintf(dur, sizeof(dur), "--");
   }
@@ -437,21 +477,27 @@ static void drawHistoryPage() {
   // IP always available here (handy for the web UI)
   gfxText(frame, frame.width() - 4, 14, ip, COL_CYAN, COL_BLACK, 1, false, true);
 
-  // History panel uses Wh (HA-friendly); main strip still shows mWh
+  // Peak = max instantaneous W; Avg = energy / charged time (not wall clock)
   const float wh = session.mwh / 1000.0f;
+  const float avgW = sessionAvgW();
   snprintf(buf, sizeof(buf), "%.1fW", session.peakW);
   gfxText(frame, 4, 28, "PEAK", COL_DARKGREY, COL_BLACK, 1);
   gfxText(frame, 4, 40, buf, COL_WHITE, COL_BLACK, 2);
 
-  snprintf(buf, sizeof(buf), "%.3fWh", wh);
-  gfxText(frame, 120, 28, "ENERGY", COL_DARKGREY, COL_BLACK, 1);
-  gfxText(frame, 120, 40, buf, COL_WHITE, COL_BLACK, 2);
+  snprintf(buf, sizeof(buf), "%.1fW", avgW);
+  gfxText(frame, 88, 28, "AVG", COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 88, 40, buf, COL_WHITE, COL_BLACK, 2);
 
-  snprintf(buf, sizeof(buf), "C pk %.2fA %.1fW", session.peakC_A, session.peakC_W);
+  snprintf(buf, sizeof(buf), "%.3fWh", wh);
+  gfxText(frame, 168, 28, "ENERGY", COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 168, 40, buf, COL_WHITE, COL_BLACK, 1);
+
+  // W with amps at that same peak-W sample (not independent peak A)
+  snprintf(buf, sizeof(buf), "C pk %.1fW @%.2fA", session.peakC_W, session.peakC_W_A);
   gfxText(frame, 4, 64, buf, COL_YELLOW, COL_BLACK, 1);
   drawSparkline(frame, 4, 76, 110, 22, histC, COL_YELLOW);
 
-  snprintf(buf, sizeof(buf), "A pk %.2fA %.1fW", session.peakA_A, session.peakA_W);
+  snprintf(buf, sizeof(buf), "A pk %.1fW @%.2fA", session.peakA_W, session.peakA_W_A);
   gfxText(frame, 122, 64, buf, COL_MAGENTA, COL_BLACK, 1);
   drawSparkline(frame, 122, 76, 110, 22, histA, COL_MAGENTA);
 
