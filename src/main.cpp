@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <TFT_eSPI.h>
 #include <esp_system.h>
 #include <OneButton.h>
 #include <WiFi.h>
@@ -10,6 +9,7 @@
 #include "pins.h"
 #include "sw3518.h"
 #include "secrets.h"
+#include "geek_display.h"
 
 enum class Page : uint8_t { Main = 0, UsbC = 1, UsbA = 2 };
 
@@ -23,7 +23,7 @@ static constexpr float kLoadMa = 50.0f;
 static constexpr int kBlFull = 255;
 static constexpr int kBlDim = 40;
 
-TFT_eSPI tft = TFT_eSPI(135, 240);
+GeekDisplay tft;
 HardwareSerial UartDbg(0);
 
 static void logLine(const char* msg) {
@@ -37,7 +37,7 @@ SW3518 charger;
 OneButton bootBtn(PIN_BOOT_BTN, true, true);
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
-SPIClass sdSpi(HSPI);
+SPIClass* sdSpi = nullptr;
 
 bool backlightForcedOff = false;
 bool nightDim = false;
@@ -49,6 +49,7 @@ uint32_t lastNavMs = 0;
 uint32_t lastActivityMs = 0;
 uint32_t lastMqttMs = 0;
 uint32_t lastSdMs = 0;
+uint32_t lastBeatMs = 0;
 uint32_t protoFlashUntil = 0;
 SW3518::Protocol lastProtocol = SW3518::Protocol::None;
 SW3518::Snapshot snap;
@@ -170,7 +171,7 @@ static void drawSparkline(int x, int y, int w, int h, const float* data, uint16_
     const size_t idx = (histIdx + kHist - histCount + i) % kHist;
     if (data[idx] > mx) mx = data[idx];
   }
-  tft.drawRect(x, y, w, h, TFT_DARKGREY);
+  tft.drawRect(x, y, w, h, COL_DARKGREY);
   int prevX = x + 1, prevY = y + h - 2;
   const size_t denom = histCount > 1 ? histCount - 1 : 1;
   for (size_t i = 0; i < histCount; i++) {
@@ -190,95 +191,72 @@ static void formatDuration(uint32_t ms, char* out, size_t n) {
 }
 
 static void drawMissing() {
-  tft.fillScreen(TFT_BLACK);
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-  tft.drawString("SW3518 not found", tft.width() / 2, tft.height() / 2 - 12, 2);
-  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.drawString("I2C 0x3C  SDA16/SCL17", tft.width() / 2, tft.height() / 2 + 12, 2);
+  tft.fillScreen(COL_BLACK);
+  tft.text(tft.W() / 2, tft.H() / 2 - 12, "SW3518 not found", COL_ORANGE, COL_BLACK, 1, true);
+  tft.text(tft.W() / 2, tft.H() / 2 + 4, "I2C 0x3C SDA16/SCL17", COL_DARKGREY, COL_BLACK, 1, true);
 }
 
 static void drawMain(uint32_t now) {
-  const int w = tft.width();
-  tft.fillScreen(TFT_BLACK);
+  const int w = tft.W();
+  tft.fillScreen(COL_BLACK);
 
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(TFT_CYAN, TFT_BLACK);
-  tft.drawString("CHARGER", 4, 1, 2);
-
+  tft.text(4, 2, "CHARGER", COL_CYAN, COL_BLACK, 1);
   const bool charging = snap.ia_ma > kLoadMa || snap.ic_ma > kLoadMa;
-  tft.setTextDatum(TR_DATUM);
-  tft.setTextColor(charging ? TFT_GREEN : TFT_DARKGREY, TFT_BLACK);
-  tft.drawString(charging ? "CHG" : "IDLE", w - 4, 1, 2);
+  tft.text(w - 4, 2, charging ? "CHG" : "IDLE", charging ? COL_GREEN : COL_DARKGREY, COL_BLACK, 1, false, true);
 
   const bool flash = now < protoFlashUntil;
-  tft.setTextDatum(TC_DATUM);
-  if (flash) tft.fillRect(w / 2 - 50, 16, 100, 16, TFT_YELLOW);
-  tft.setTextColor(flash ? TFT_BLACK : TFT_YELLOW, flash ? TFT_YELLOW : TFT_BLACK);
-  tft.drawString(SW3518::protocolName(snap.protocol), w / 2, 16, 2);
+  const char* proto = SW3518::protocolName(snap.protocol);
+  if (flash) tft.fillRect(w / 2 - 50, 16, 100, 14, COL_YELLOW);
+  tft.text(w / 2, 18, proto, flash ? COL_BLACK : COL_YELLOW, flash ? COL_YELLOW : COL_BLACK, 1, true);
 
   char buf[40];
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
   snprintf(buf, sizeof(buf), "%.1fW", snap.power_total_w);
-  tft.drawString(buf, w / 2, 34, 4);
+  tft.text(w / 2, 34, buf, COL_WHITE, COL_BLACK, 2, true);
 
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   snprintf(buf, sizeof(buf), "in %.1fV", snap.vin_mv / 1000.0f);
-  tft.drawString(buf, 4, 62, 2);
+  tft.text(4, 62, buf, COL_LIGHTGREY, COL_BLACK, 1);
   snprintf(buf, sizeof(buf), "out %.2fV", snap.vout_mv / 1000.0f);
-  tft.drawString(buf, w / 2, 62, 2);
+  tft.text(w / 2, 62, buf, COL_LIGHTGREY, COL_BLACK, 1);
 
-  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-  tft.drawString("C", 4, 78, 1);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.text(4, 78, "C", COL_YELLOW, COL_BLACK, 1);
   snprintf(buf, sizeof(buf), "%.2fA", snap.ic_ma / 1000.0f);
-  tft.drawString(buf, 14, 78, 2);
-  tft.setTextColor(TFT_MAGENTA, TFT_BLACK);
-  tft.drawString("A", w / 2, 78, 1);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.text(14, 78, buf, COL_WHITE, COL_BLACK, 1);
+  tft.text(w / 2, 78, "A", COL_MAGENTA, COL_BLACK, 1);
   snprintf(buf, sizeof(buf), "%.2fA", snap.ia_ma / 1000.0f);
-  tft.drawString(buf, w / 2 + 10, 78, 2);
+  tft.text(w / 2 + 10, 78, buf, COL_WHITE, COL_BLACK, 1);
 
-  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   if (session.active || session.mwh > 0.01) {
     char dur[16];
     formatDuration(now - session.startMs, dur, sizeof(dur));
-    snprintf(buf, sizeof(buf), "%s  pk %.0fW  %.0fmWh", dur, session.peakW, session.mwh);
+    snprintf(buf, sizeof(buf), "%s pk %.0fW %.0fmWh", dur, session.peakW, session.mwh);
   } else {
-    snprintf(buf, sizeof(buf), "session --  dbl-tap clear");
+    snprintf(buf, sizeof(buf), "session -- dbl-tap clear");
   }
-  tft.drawString(buf, 4, 94, 1);
+  tft.text(4, 94, buf, COL_DARKGREY, COL_BLACK, 1);
 
-  drawSparkline(4, 106, w / 2 - 6, 26, histC, TFT_YELLOW);
-  drawSparkline(w / 2 + 2, 106, w / 2 - 6, 26, histA, TFT_MAGENTA);
+  drawSparkline(4, 106, w / 2 - 6, 26, histC, COL_YELLOW);
+  drawSparkline(w / 2 + 2, 106, w / 2 - 6, 26, histA, COL_MAGENTA);
 }
 
 static void drawPort(bool usbC) {
-  const int w = tft.width();
-  tft.fillScreen(TFT_BLACK);
-  const uint16_t accent = usbC ? TFT_YELLOW : TFT_MAGENTA;
+  const int w = tft.W();
+  tft.fillScreen(COL_BLACK);
+  const uint16_t accent = usbC ? COL_YELLOW : COL_MAGENTA;
   const float amps = (usbC ? snap.ic_ma : snap.ia_ma) / 1000.0f;
   const float watts = usbC ? snap.power_c_w : snap.power_a_w;
   const float* hist = usbC ? histC : histA;
   const float peakA = usbC ? session.peakC_A : session.peakA_A;
 
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(accent, TFT_BLACK);
-  tft.drawString(usbC ? "USB-C" : "USB-A", 4, 2, 2);
-  tft.setTextDatum(TR_DATUM);
-  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.drawString(SW3518::protocolName(snap.protocol), w - 4, 2, 2);
+  tft.text(4, 2, usbC ? "USB-C" : "USB-A", accent, COL_BLACK, 1);
+  tft.text(w - 4, 2, SW3518::protocolName(snap.protocol), COL_DARKGREY, COL_BLACK, 1, false, true);
 
   char buf[32];
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
   snprintf(buf, sizeof(buf), "%.2f V", snap.vout_mv / 1000.0f);
-  tft.drawString(buf, 4, 20, 4);
-  snprintf(buf, sizeof(buf), "%.2f A   pk %.2f A", amps, peakA);
-  tft.drawString(buf, 4, 52, 2);
-  snprintf(buf, sizeof(buf), "%.2f W", watts);
-  tft.drawString(buf, w / 2, 52, 2);
+  tft.text(4, 20, buf, COL_WHITE, COL_BLACK, 2);
+  snprintf(buf, sizeof(buf), "%.2fA pk %.2fA", amps, peakA);
+  tft.text(4, 52, buf, COL_WHITE, COL_BLACK, 1);
+  snprintf(buf, sizeof(buf), "%.2fW", watts);
+  tft.text(w / 2, 52, buf, COL_WHITE, COL_BLACK, 1);
   drawSparkline(4, 76, w - 8, 54, hist, accent);
 }
 
@@ -332,8 +310,10 @@ static void publishMqtt() {
 }
 
 static void setupSd() {
-  sdSpi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
-  sdOk = SD.begin(PIN_SD_CS, sdSpi, 20000000);
+  // Create HSPI only after LCD owns FSPI — avoids S3 SPI bring-up fights.
+  sdSpi = new SPIClass(HSPI);
+  sdSpi->begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
+  sdOk = SD.begin(PIN_SD_CS, *sdSpi, 20000000);
   Serial.println(sdOk ? "SD OK" : "SD not present");
   if (sdOk && !SD.exists("/sw3518.csv")) {
     File f = SD.open("/sw3518.csv", FILE_WRITE);
@@ -358,7 +338,6 @@ static void logSd(uint32_t now) {
 }
 
 void setup() {
-  // Alive before USB/TFT: backlight blinks even if CDC or LCD init fails.
   pinMode(PIN_TFT_BL, OUTPUT);
   for (int i = 0; i < 4; ++i) {
     digitalWrite(PIN_TFT_BL, HIGH);
@@ -369,12 +348,10 @@ void setup() {
   digitalWrite(PIN_TFT_BL, HIGH);
 
   Serial.begin(115200);
-  UartDbg.begin(115200, SERIAL_8N1, PIN_UART_RX, PIN_UART_TX);  // 3-pin UART header
-  // CDC: wait briefly for host monitor, then continue anyway.
+  UartDbg.begin(115200, SERIAL_8N1, PIN_UART_RX, PIN_UART_TX);
   const uint32_t serialDeadline = millis() + 2000;
-  while (!Serial && millis() < serialDeadline) {
-    delay(10);
-  }
+  while (!Serial && millis() < serialDeadline) delay(10);
+
   logLine("");
   logLine("ESP32-S3-GEEK SW3518 stats");
   const int rr = (int)esp_reset_reason();
@@ -392,30 +369,18 @@ void setup() {
   Serial.printf("CDC + UART0, reset %d (%s)\n", rr, rrs);
   UartDbg.printf("CDC + UART0, reset %d (%s)\n", rr, rrs);
 
-  Serial.println("TFT init...");
+  Serial.println("Adafruit ST7789 init...");
   Serial.flush();
-  UartDbg.println("TFT init...");
-  // begin() panicked with TFT_SDA_READ / PSRAM — step carefully
-  Serial.println("tft.begin()...");
+  tft.beginPanel();
+  Serial.println("panel ok");
   Serial.flush();
-  tft.begin();
-  Serial.println("tft.begin() ok");
-  Serial.flush();
-  tft.setRotation(1);
-  Serial.println("rotation ok");
-  Serial.flush();
-  tft.setSwapBytes(true);
-  tft.setTextFont(2);
-  if (TFT_BL >= 0) {
-    pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
-  }
-  tft.fillScreen(TFT_RED);
+
+  tft.fillScreen(COL_RED);
   delay(250);
-  tft.fillScreen(TFT_GREEN);
+  tft.fillScreen(COL_GREEN);
   delay(250);
-  tft.fillScreen(TFT_BLACK);
-  Serial.printf("TFT %dx%d rot1\n", tft.width(), tft.height());
+  tft.fillScreen(COL_BLACK);
+  Serial.printf("TFT %dx%d\n", tft.W(), tft.H());
   Serial.flush();
   digitalWrite(PIN_TFT_BL, HIGH);
 
@@ -434,17 +399,15 @@ void setup() {
   }
 }
 
-static uint32_t lastBeatMs = 0;
-
 void loop() {
   bootBtn.tick();
   const uint32_t now = millis();
 
   if (now - lastBeatMs >= 2000) {
     lastBeatMs = now;
-    Serial.printf("alive %lu tft=%dx%d\n", (unsigned long)now, tft.width(), tft.height());
+    Serial.printf("alive %lu tft=%dx%d\n", (unsigned long)now, tft.W(), tft.H());
     Serial.flush();
-    UartDbg.printf("alive %lu tft=%dx%d\n", (unsigned long)now, tft.width(), tft.height());
+    UartDbg.printf("alive %lu tft=%dx%d\n", (unsigned long)now, tft.W(), tft.H());
   }
 
   if (wifiEnabled) {
