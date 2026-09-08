@@ -19,3 +19,8 @@ static const int PIN_SD_CS   = 34;
 static const int PIN_SD_MOSI = 35;
 static const int PIN_SD_SCK  = 36;
 static const int PIN_SD_MISO = 37;
+
+// Waveshare 3-pin UART header (USB-UART adapter fallback)
+static const int PIN_UART_TX = 43;
+static const int PIN_UART_RX = 44;
+

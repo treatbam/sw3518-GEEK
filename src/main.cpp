@@ -23,7 +23,16 @@ static constexpr float kLoadMa = 50.0f;
 static constexpr int kBlFull = 255;
 static constexpr int kBlDim = 40;
 
-TFT_eSPI tft;
+TFT_eSPI tft = TFT_eSPI(135, 240);
+HardwareSerial UartDbg(0);
+
+static void logLine(const char* msg) {
+  Serial.println(msg);
+  Serial.flush();
+  UartDbg.println(msg);
+  UartDbg.flush();
+}
+
 SW3518 charger;
 OneButton bootBtn(PIN_BOOT_BTN, true, true);
 WiFiClient wifiClient;
@@ -360,26 +369,35 @@ void setup() {
   digitalWrite(PIN_TFT_BL, HIGH);
 
   Serial.begin(115200);
-  // TinyUSB CDC: wait briefly for host monitor, then continue anyway.
-  const uint32_t serialDeadline = millis() + 3000;
+  UartDbg.begin(115200, SERIAL_8N1, PIN_UART_RX, PIN_UART_TX);  // 3-pin UART header
+  // CDC: wait briefly for host monitor, then continue anyway.
+  const uint32_t serialDeadline = millis() + 2000;
   while (!Serial && millis() < serialDeadline) {
     delay(10);
   }
-  Serial.println();
-  Serial.println("ESP32-S3-GEEK SW3518 stats");
-  Serial.printf("USB_MODE TinyUSB CDC, reset reason %u\n", (unsigned)esp_reset_reason());
+  logLine("");
+  logLine("ESP32-S3-GEEK SW3518 stats");
+  Serial.printf("CDC + UART0, reset reason %u\n", (unsigned)esp_reset_reason());
+  UartDbg.printf("CDC + UART0, reset reason %u\n", (unsigned)esp_reset_reason());
 
   Serial.println("TFT init...");
-  tft.init();
-  // Waveshare/espp landscape inverted ≈ rotation 3 on many ST7789 panels.
-  tft.setRotation(3);
+  Serial.flush();
+  // Match Waveshare 08_SD_LCD demo: begin + rotation 1 (landscape 240x135)
+  tft.begin();
+  tft.setRotation(1);
+  tft.setSwapBytes(true);
   tft.setTextFont(2);
+  if (TFT_BL >= 0) {
+    pinMode(TFT_BL, OUTPUT);
+    digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
+  }
   tft.fillScreen(TFT_RED);
-  delay(200);
+  delay(250);
   tft.fillScreen(TFT_GREEN);
-  delay(200);
+  delay(250);
   tft.fillScreen(TFT_BLACK);
-  Serial.printf("TFT %dx%d\n", tft.width(), tft.height());
+  Serial.printf("TFT %dx%d rot1\n", tft.width(), tft.height());
+  Serial.flush();
   digitalWrite(PIN_TFT_BL, HIGH);
 
   bootBtn.attachClick(onBootClick);
@@ -397,9 +415,18 @@ void setup() {
   }
 }
 
+static uint32_t lastBeatMs = 0;
+
 void loop() {
   bootBtn.tick();
   const uint32_t now = millis();
+
+  if (now - lastBeatMs >= 2000) {
+    lastBeatMs = now;
+    Serial.printf("alive %lu tft=%dx%d\n", (unsigned long)now, tft.width(), tft.height());
+    Serial.flush();
+    UartDbg.printf("alive %lu tft=%dx%d\n", (unsigned long)now, tft.width(), tft.height());
+  }
 
   if (wifiEnabled) {
     ensureMqtt();
