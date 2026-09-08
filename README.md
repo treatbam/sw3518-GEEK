@@ -56,6 +56,10 @@ The PCB schematic breaks the I2C header out on **GPIO16 / GPIO17**. Some Wavesha
 
 Driver lives in `include/sw3518.h` + `src/sw3518.cpp` (minimal ADC path; register notes from iSmartWare datasheet / RG003).
 
+## Blank screen after flash?
+
+Rebuild with latest `main` (needs `CGRAM_OFFSET` + inversion for the 135×240 ST7789). You should see a brief red→green flash on boot. If still black: hold BOOT, reflash, and watch serial at 115200.
+
 ## Build & flash (PlatformIO)
 
 ```bash

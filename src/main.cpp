@@ -76,13 +76,18 @@ static void touchActivity() {
   if (nightDim && !backlightForcedOff) {
     nightDim = false;
     blLevel = kBlFull;
-    analogWrite(PIN_TFT_BL, blLevel);
+    applyBacklight();
   }
 }
 
 static void applyBacklight() {
+  // ESP32-S3: full ON via digitalWrite is most reliable; dim via analogWrite/LEDC.
   if (backlightForcedOff) {
-    analogWrite(PIN_TFT_BL, 0);
+    digitalWrite(PIN_TFT_BL, LOW);
+    return;
+  }
+  if (blLevel >= kBlFull) {
+    digitalWrite(PIN_TFT_BL, HIGH);
   } else {
     analogWrite(PIN_TFT_BL, blLevel);
   }
@@ -379,14 +384,23 @@ void setup() {
   Serial.println("ESP32-S3-GEEK SW3518 stats");
 
   pinMode(PIN_TFT_BL, OUTPUT);
-  analogWrite(PIN_TFT_BL, kBlFull);
+  digitalWrite(PIN_TFT_BL, HIGH);  // force backlight on before init
 
   tft.init();
-  tft.setRotation(1);
+  tft.setRotation(1);  // landscape 240x135
+  // Visible boot flash so a "blank" screen is distinguishable from BL-off
+  tft.fillScreen(TFT_RED);
+  delay(150);
+  tft.fillScreen(TFT_GREEN);
+  delay(150);
   tft.fillScreen(TFT_BLACK);
+
   spr.setColorDepth(16);
-  spr.createSprite(tft.width(), tft.height());
+  if (!spr.createSprite(tft.width(), tft.height())) {
+    Serial.println("Sprite alloc failed — drawing direct");
+  }
   spr.setTextFont(2);
+  digitalWrite(PIN_TFT_BL, HIGH);
 
   bootBtn.attachClick(onBootClick);
   bootBtn.attachDoubleClick(onBootDouble);
