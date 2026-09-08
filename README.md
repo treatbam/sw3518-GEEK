@@ -4,12 +4,13 @@ Live USB charger stats on a [Waveshare ESP32-S3-GEEK](https://www.waveshare.com/
 
 ## What you get
 
-- **Main**: total W, Vin/Vout, C/A amps+watts, and active fast-charge **protocol** (from SW3518 `0x06`)
-- **USB-C page**: big V/A/W + power sparkline
-- **USB-A page**: same for the A port
-- BOOT: short press cycles Main → USB-C → USB-A → Main; double-tap returns home; long press toggles backlight
-- After **60 seconds** on a detail page, auto-returns to Main
-- Serial monitor at `115200` with the same readings
+- **Main**: total W, Vin/Vout, C/A amps, active **protocol** (reg `0x06`), session strip (duration / peak W / mWh), dual C/A power sparklines
+- **USB-C / USB-A pages**: big V/A/W, per-port peak A, sparkline
+- Protocol chip **flashes** for 2s when the negotiated protocol changes
+- **Night mode**: backlight dims after 45s idle; any button wakes it
+- Optional **Wi‑Fi → MQTT** for Home Assistant (topics under `geek/sw3518/...`)
+- Optional **TF card** CSV logger (`/sw3518.csv`) while a load is present
+- Serial monitor at `115200`
 
 ## Wiring (GEEK 4-pin I2C header → SW3518)
 
@@ -72,9 +73,31 @@ Board selection in Arduino IDE (if you prefer): **ESP32S3 Dev Module**, flash 16
 | Action | Result |
 |--------|--------|
 | BOOT short press | Main → USB-C → USB-A → Main |
-| BOOT double tap | Jump back to Main |
-| BOOT long press | Toggle backlight |
+| BOOT double tap | On detail → Main; on Main → **clear session** |
+| BOOT long press | Toggle backlight fully off/on |
 | Idle 60s on C/A page | Auto-return to Main |
+| Idle 45s (any page) | Dim backlight (night mode) |
+
+
+## Wi‑Fi / MQTT (Home Assistant)
+
+1. `cp include/secrets.h.example include/secrets.h`
+2. Fill `WIFI_*` and `MQTT_*` (broker can be HA’s Mosquitto / Tailscale IP)
+3. Rebuild & flash
+
+Published (retained) under `MQTT_BASE` (default `geek/sw3518`):
+
+`vin`, `vout`, `i_c`, `i_a`, `power`, `protocol`, `session_mwh`, `session_peak_w`
+
+In HA, create MQTT sensors from those topics (or use MQTT discovery later).
+
+## TF card logging
+
+Insert a FAT32 card. While charging, appends to `/sw3518.csv`:
+
+`ms,vin_mv,vout_mv,ic_ma,ia_ma,power_w,protocol`
+
+No card = silent skip.
 
 ## Repo status
 

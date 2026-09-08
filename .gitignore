@@ -7,3 +7,6 @@
 *.elf
 *.bin
 .DS_Store
+
+# local credentials
+include/secrets.h
