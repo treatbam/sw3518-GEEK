@@ -276,6 +276,20 @@ static void finishAnim(uint32_t now) {
 }
 
 
+
+static void ipText(char* out, size_t n) {
+#if HAS_WIFI
+  if (WiFi.status() == WL_CONNECTED) {
+    IPAddress ip = WiFi.localIP();
+    snprintf(out, n, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+  } else {
+    snprintf(out, n, "wifi...");
+  }
+#else
+  snprintf(out, n, "no-wifi");
+#endif
+}
+
 static int wifiBars() {
 #if HAS_WIFI
   if (WiFi.status() != WL_CONNECTED) return 0;
@@ -351,14 +365,17 @@ static void drawMainChrome() {
   snprintf(buf, sizeof(buf), "%.2fA", snap.ia_ma / 1000.0f);
   gfxText(frame, w / 2 + 10, 78, buf, COL_WHITE, COL_BLACK, 1);
 
+  char ip[20];
+  ipText(ip, sizeof(ip));
   if (session.active || session.mwh > 0.01) {
     char dur[16];
     formatDuration(millis() - session.startMs, dur, sizeof(dur));
-    snprintf(buf, sizeof(buf), "%s pk %.0fW %.0fmWh", dur, session.peakW, session.mwh);
+    snprintf(buf, sizeof(buf), "%s  %.0fmWh", dur, session.mwh);
+    gfxText(frame, 4, 94, buf, COL_DARKGREY, COL_BLACK, 1);
   } else {
-    snprintf(buf, sizeof(buf), "idle — long-hold clears");
+    gfxText(frame, 4, 94, "idle - long-hold clears", COL_DARKGREY, COL_BLACK, 1);
   }
-  gfxText(frame, 4, 94, buf, COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, frame.width() - 4, 94, ip, COL_CYAN, COL_BLACK, 1, false, true);
 }
 
 static void drawPortChrome(bool usbC, float alpha) {
@@ -383,10 +400,12 @@ static void drawPortChrome(bool usbC, float alpha) {
   snprintf(buf, sizeof(buf), "%.2fA pk%.2f", amps, peakA);
   gfxText(frame, w / 2 - 10, 48, buf, COL_WHITE, COL_BLACK, 1);
 
-  char span[24], label[36];
+  char span[24], label[36], ip[20];
   formatDuration(session.active ? (millis() - session.startMs) : histSpanMs(), span, sizeof(span));
   snprintf(label, sizeof(label), "span %s", span);
   gfxText(frame, 4, 62, label, COL_DARKGREY, COL_BLACK, 1);
+  ipText(ip, sizeof(ip));
+  gfxText(frame, frame.width() - 4, 62, ip, COL_CYAN, COL_BLACK, 1, false, true);
 }
 
 static void drawHistoryPage() {
@@ -401,7 +420,10 @@ static void drawHistoryPage() {
   } else {
     snprintf(dur, sizeof(dur), "--");
   }
+  char ip[20];
+  ipText(ip, sizeof(ip));
   gfxText(frame, 4, 14, dur, COL_LIGHTGREY, COL_BLACK, 1);
+  gfxText(frame, frame.width() - 4, 14, ip, COL_CYAN, COL_BLACK, 1, false, true);
 
   // History panel uses Wh (HA-friendly); main strip still shows mWh
   const float wh = session.mwh / 1000.0f;
@@ -834,10 +856,16 @@ void loop() {
   }
 
   if (wifiEnabled) {
-    if (WiFi.status() == WL_CONNECTED) {
+    static wl_status_t lastWifi = WL_IDLE_STATUS;
+    const wl_status_t st = WiFi.status();
+    if (st == WL_CONNECTED) {
+      if (lastWifi != WL_CONNECTED) {
+        Serial.printf("WiFi IP %s\n", WiFi.localIP().toString().c_str());
+      }
       setupWeb();
       web.handleClient();
     }
+    lastWifi = st;
     ensureMqtt();
     mqtt.loop();
   }
