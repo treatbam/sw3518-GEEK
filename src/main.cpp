@@ -7,6 +7,7 @@
 #include <SPI.h>
 #include <SD.h>
 #include <math.h>
+#include <Preferences.h>
 #include <string.h>
 
 #include "pins.h"
@@ -101,6 +102,119 @@ static float sessionAvgW() {
   return static_cast<float>(session.mwh * 3600.0 / session.chargedMs);
 }
 
+static Preferences sessionPrefs;
+static bool sessionDirty = false;
+static uint32_t lastSessionSaveMs = 0;
+static constexpr uint32_t kSessionSaveMs = 5000;
+static constexpr uint32_t kPersistMagic = 0x4745454Bu;  // GEEK
+static constexpr uint16_t kPersistVer = 1;
+
+struct PersistedSession {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t histCount;
+  uint32_t chargedMs;
+  uint32_t histPeriodMs;
+  double mwh;
+  float peakW;
+  float peakA;
+  float peakC_A;
+  float peakA_A;
+  float peakC_W;
+  float peakA_W;
+  float peakC_W_A;
+  float peakA_W_A;
+  uint16_t peakVoutMv;
+  uint16_t _pad;
+  float histC[kHistMax];
+  float histA[kHistMax];
+};
+
+static void markSessionDirty() { sessionDirty = true; }
+
+static void saveSessionPersist(bool force = false) {
+  const uint32_t now = millis();
+  if (!force) {
+    if (!sessionDirty) return;
+    if (now - lastSessionSaveMs < kSessionSaveMs) return;
+  }
+  PersistedSession blob = {};
+  blob.magic = kPersistMagic;
+  blob.version = kPersistVer;
+  blob.histCount = (uint16_t)histCount;
+  blob.chargedMs = session.chargedMs;
+  blob.histPeriodMs = histPeriodMs;
+  blob.mwh = session.mwh;
+  blob.peakW = session.peakW;
+  blob.peakA = session.peakA;
+  blob.peakC_A = session.peakC_A;
+  blob.peakA_A = session.peakA_A;
+  blob.peakC_W = session.peakC_W;
+  blob.peakA_W = session.peakA_W;
+  blob.peakC_W_A = session.peakC_W_A;
+  blob.peakA_W_A = session.peakA_W_A;
+  blob.peakVoutMv = session.peakVoutMv;
+  memcpy(blob.histC, histC, sizeof(histC));
+  memcpy(blob.histA, histA, sizeof(histA));
+
+  if (!sessionPrefs.begin("geek-sess", false)) {
+    Serial.println("NVS session open failed");
+    return;
+  }
+  const size_t n = sessionPrefs.putBytes("snap", &blob, sizeof(blob));
+  sessionPrefs.end();
+  if (n == sizeof(blob)) {
+    sessionDirty = false;
+    lastSessionSaveMs = now;
+    Serial.printf("Session saved (%u B)\n", (unsigned)n);
+  } else {
+    Serial.println("Session save short write");
+  }
+}
+
+static void loadSessionPersist() {
+  if (!sessionPrefs.begin("geek-sess", true)) return;
+  PersistedSession blob = {};
+  const size_t n = sessionPrefs.getBytes("snap", &blob, sizeof(blob));
+  sessionPrefs.end();
+  if (n != sizeof(blob) || blob.magic != kPersistMagic || blob.version != kPersistVer) {
+    Serial.println("No persisted session");
+    return;
+  }
+  if (blob.histCount > kHistMax) blob.histCount = kHistMax;
+
+  session = Session{};
+  // Non-zero startMs marks a living session without wiping on next load
+  session.startMs = 1;
+  session.active = false;
+  session.chargedMs = blob.chargedMs;
+  session.mwh = blob.mwh;
+  session.peakW = blob.peakW;
+  session.peakA = blob.peakA;
+  session.peakC_A = blob.peakC_A;
+  session.peakA_A = blob.peakA_A;
+  session.peakC_W = blob.peakC_W;
+  session.peakA_W = blob.peakA_W;
+  session.peakC_W_A = blob.peakC_W_A;
+  session.peakA_W_A = blob.peakA_W_A;
+  session.peakVoutMv = blob.peakVoutMv;
+  histCount = blob.histCount;
+  histPeriodMs = blob.histPeriodMs ? blob.histPeriodMs : 250;
+  memcpy(histC, blob.histC, sizeof(histC));
+  memcpy(histA, blob.histA, sizeof(histA));
+  sessionDirty = false;
+  Serial.printf("Session restored: %.1f mWh  peak %.1f W  hist %u\n", session.mwh, session.peakW,
+                (unsigned)histCount);
+}
+
+static void eraseSessionPersist() {
+  if (!sessionPrefs.begin("geek-sess", false)) return;
+  sessionPrefs.clear();
+  sessionPrefs.end();
+  sessionDirty = false;
+  Serial.println("Session NVS erased");
+}
+
 struct Anim {
   enum Kind : uint8_t { Idle = 0, ZoomIn = 1, ZoomOut = 2 } kind = Idle;
   Page from = Page::Main;
@@ -160,6 +274,7 @@ static void clearSession() {
   histPeriodMs = 250;
   memset(histC, 0, sizeof(histC));
   memset(histA, 0, sizeof(histA));
+  eraseSessionPersist();
   Serial.println("Session cleared");
 }
 
@@ -209,6 +324,7 @@ static void updateSession(uint32_t now) {
       session.peakA_W_A = aA;
     }
     if (snap.vout_mv > session.peakVoutMv) session.peakVoutMv = snap.vout_mv;
+    markSessionDirty();
   } else if (session.active) {
     // Close out the last loaded interval before stopping the clock
     if (session.lastSampleMs && now > session.lastSampleMs) {
@@ -220,6 +336,8 @@ static void updateSession(uint32_t now) {
     if (loadGoneSince == 0) loadGoneSince = now;
     if (now - loadGoneSince >= kSessionEndDebounceMs) {
       session.active = false;
+      markSessionDirty();
+      saveSessionPersist(true);
     }
   }
 }
@@ -239,6 +357,7 @@ static void pushHistory() {
   histC[histCount] = snap.power_c_w;
   histA[histCount] = snap.power_a_w;
   histCount++;
+  markSessionDirty();
 }
 
 static uint32_t histSpanMs() {
@@ -565,7 +684,7 @@ static void drawHistoryPage() {
 
   snprintf(buf, sizeof(buf), "Vout pk %.2fV", session.peakVoutMv / 1000.0f);
   gfxText(frame, 4, 104, buf, COL_LIGHTGREY, COL_BLACK, 1);
-  gfxText(frame, 4, 118, "long=clear  x3=radio  dbl=session", COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 118, "long=clear  saved in flash", COL_DARKGREY, COL_BLACK, 1);
 }
 
 static void drawModeToast() {
@@ -1045,12 +1164,15 @@ void setup() {
   } else {
     Serial.println("SW3518 OK");
   }
+
+  loadSessionPersist();
 }
 
 void loop() {
   bootBtn.tick();
   const uint32_t now = millis();
   RadioTools::tick(now);
+  saveSessionPersist(false);
 
   if (now - lastBeatMs >= 2000) {
     lastBeatMs = now;

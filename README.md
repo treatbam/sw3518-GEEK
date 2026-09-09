@@ -93,6 +93,8 @@ Web: `/` charger · `/radio` AP JSON view · `/help` button map · `/api` metric
 
 USB-C/A pages show a session-length sparkline (grows / rebins to fit) with a time span label.
 
+Session History (energy, peaks, sparklines) **persists across reboot** in flash (NVS). Long-hold clear wipes it.
+
 
 ## Wi‑Fi / MQTT (Home Assistant)
 
