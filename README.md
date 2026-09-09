@@ -72,12 +72,24 @@ If upload fails: hold **BOOT**, plug USB-A into the PC, release BOOT (download m
 
 Board selection in Arduino IDE (if you prefer): **ESP32S3 Dev Module**, flash 16 MB, PSRAM enabled, **USB CDC On Boot = Enabled**.
 
-## Controls
+## Controls (single BOOT button)
 
-- **Short press:** zoom cycle — Main → USB-C → Main → USB-A → Main → Session stats → Main
-- **Double-tap:** jump to Session stats (again to return to Main)
-- **Long press:** clear session history (new connection)
+**Charger mode** (default)
+
+- **Short:** zoom cycle — Main → USB-C → Main → USB-A → Main → Session → Main
+- **Double:** Session stats (again returns to Main)
+- **Triple:** enter **Radio** mode
+- **Long:** clear session (new connection)
 - **Idle dim:** after 90s, backlight to 50% (any press restores)
+
+**Radio mode** (Wi‑Fi tools — beacon scan / channel heat; not an attack suite)
+
+- **Short:** next page — Wi‑Fi Scan → Channel Heat → System → Help → …
+- **Double:** previous radio page
+- **Triple:** back to **Charger**
+- **Long:** force Wi‑Fi rescan
+
+Web: `/` charger · `/radio` AP JSON view · `/help` button map · `/api` metrics
 
 USB-C/A pages show a session-length sparkline (grows / rebins to fit) with a time span label.
 

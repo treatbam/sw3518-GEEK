@@ -7,13 +7,17 @@
 #include <SPI.h>
 #include <SD.h>
 #include <math.h>
+#include <string.h>
 
 #include "pins.h"
 #include "sw3518.h"
 #include "secrets.h"
 #include "geek_display.h"
+#include "radio_tools.h"
 
 enum class Page : uint8_t { Main = 0, UsbC = 1, UsbA = 2, History = 3 };
+enum class Mode : uint8_t { Charger = 0, Radio = 1 };
+enum class RadioPage : uint8_t { WifiScan = 0, ChannelHeat = 1, Sys = 2, Help = 3, Count = 4 };
 
 static constexpr size_t kHistMax = 120;
 static constexpr uint32_t kUiMs = 200;
@@ -52,7 +56,11 @@ bool webStarted = false;
 bool nightDim = false;
 int blLevel = kBlFull;
 Page page = Page::Main;
+Mode mode = Mode::Charger;
+RadioPage radioPage = RadioPage::WifiScan;
 uint8_t nextFromMain = 0;  // 0=UsbC, 1=UsbA, 2=History
+uint32_t modeToastUntil = 0;
+char modeToast[16] = "";
 uint32_t lastUiMs = 0;
 uint32_t lastProbeMs = 0;
 uint32_t lastActivityMs = 0;
@@ -271,9 +279,43 @@ static void startZoom(Anim::Kind kind, Page from, Page to) {
   anim.startMs = millis();
 }
 
+static void showModeToast(const char* label) {
+  strncpy(modeToast, label, sizeof(modeToast) - 1);
+  modeToast[sizeof(modeToast) - 1] = 0;
+  modeToastUntil = millis() + 900;
+}
+
+static void enterRadioMode() {
+  mode = Mode::Radio;
+  radioPage = RadioPage::WifiScan;
+  anim.kind = Anim::Idle;
+  // Scan works without joining a network; ensure radio is up
+  if (WiFi.getMode() == WIFI_MODE_NULL) WiFi.mode(WIFI_STA);
+  RadioTools::enter();
+  RadioTools::requestScan();
+  showModeToast("RADIO");
+  Serial.println("Mode: RADIO");
+}
+
+static void enterChargerMode() {
+  mode = Mode::Charger;
+  RadioTools::leave();
+  page = Page::Main;
+  nextFromMain = 0;
+  anim.kind = Anim::Idle;
+  showModeToast("CHARGER");
+  Serial.println("Mode: CHARGER");
+}
+
 static void onBootClick() {
   touchActivity();
   if (anim.busy()) return;
+
+  if (mode == Mode::Radio) {
+    radioPage = static_cast<RadioPage>((static_cast<uint8_t>(radioPage) + 1) %
+                                       static_cast<uint8_t>(RadioPage::Count));
+    return;
+  }
 
   if (page == Page::Main) {
     Page dest = Page::UsbC;
@@ -287,6 +329,11 @@ static void onBootClick() {
 
 static void onBootLong() {
   touchActivity();
+  if (mode == Mode::Radio) {
+    RadioTools::requestScan();
+    showModeToast("RESCAN");
+    return;
+  }
   clearSession();
   page = Page::Main;
   nextFromMain = 0;
@@ -296,15 +343,30 @@ static void onBootLong() {
 static void onBootDouble() {
   touchActivity();
   if (anim.busy()) return;
+
+  if (mode == Mode::Radio) {
+    uint8_t i = static_cast<uint8_t>(radioPage);
+    i = (i == 0) ? (static_cast<uint8_t>(RadioPage::Count) - 1) : (i - 1);
+    radioPage = static_cast<RadioPage>(i);
+    return;
+  }
+
   if (page == Page::History) {
     startZoom(Anim::ZoomOut, Page::History, Page::Main);
   } else if (page == Page::Main) {
     startZoom(Anim::ZoomIn, Page::Main, Page::History);
   } else {
-    // From a port page: jump straight to session stats
     anim.kind = Anim::Idle;
     page = Page::History;
   }
+}
+
+static void onBootMulti() {
+  touchActivity();
+  const int n = bootBtn.getNumberClicks();
+  if (n < 3) return;
+  if (mode == Mode::Charger) enterRadioMode();
+  else enterChargerMode();
 }
 
 static void finishAnim(uint32_t now) {
@@ -427,7 +489,7 @@ static void drawMainChrome() {
     snprintf(buf, sizeof(buf), "%s  pk %.0fW avg %.0fW  %.0fmWh", dur, session.peakW,
              sessionAvgW(), session.mwh);
   } else {
-    snprintf(buf, sizeof(buf), "idle - long-hold clears");
+    snprintf(buf, sizeof(buf), "idle  long=clear  x3=radio");
   }
   gfxText(frame, 4, 94, buf, COL_DARKGREY, COL_BLACK, 1);
 }
@@ -503,7 +565,37 @@ static void drawHistoryPage() {
 
   snprintf(buf, sizeof(buf), "Vout pk %.2fV", session.peakVoutMv / 1000.0f);
   gfxText(frame, 4, 104, buf, COL_LIGHTGREY, COL_BLACK, 1);
-  gfxText(frame, 4, 118, "long-hold = new session", COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 118, "long=clear  x3=radio  dbl=session", COL_DARKGREY, COL_BLACK, 1);
+}
+
+static void drawModeToast() {
+  if (!modeToastUntil || millis() > modeToastUntil) return;
+  const int tw = (int)strlen(modeToast) * 12 + 16;
+  const int x = (frame.width() - tw) / 2;
+  frame.fillRoundRect(x, 48, tw, 28, 4, COL_CYAN);
+  gfxText(frame, frame.width() / 2, 56, modeToast, COL_BLACK, COL_CYAN, 2, true);
+}
+
+static void drawRadioFrame() {
+  const bool wifiUp = wifiEnabled && WiFi.status() == WL_CONNECTED;
+  const int8_t rssi = wifiUp ? (int8_t)WiFi.RSSI() : (int8_t)-127;
+  switch (radioPage) {
+    case RadioPage::WifiScan:
+      RadioTools::drawApList(frame, COL_WHITE, COL_DARKGREY, COL_YELLOW, COL_BLACK);
+      break;
+    case RadioPage::ChannelHeat:
+      RadioTools::drawChannelHeat(frame, COL_WHITE, COL_DARKGREY, COL_MAGENTA, COL_BLACK);
+      break;
+    case RadioPage::Sys:
+      RadioTools::drawSys(frame, COL_WHITE, COL_DARKGREY, COL_CYAN, COL_BLACK, wifiUp, rssi);
+      break;
+    case RadioPage::Help:
+    default:
+      RadioTools::drawHelp(frame, COL_WHITE, COL_DARKGREY, COL_CYAN, COL_BLACK);
+      break;
+  }
+  drawModeToast();
+  tft.push(frame);
 }
 
 static void drawFrame(uint32_t now) {
@@ -541,7 +633,8 @@ static void drawFrame(uint32_t now) {
           drawSparkline(frame, (int)ma.x, (int)ma.y, (int)ma.w, (int)ma.h, histA, COL_MAGENTA);
         }
       }
-      tft.push(frame);
+      drawModeToast();
+  tft.push(frame);
       return;
     }
 
@@ -559,7 +652,8 @@ static void drawFrame(uint32_t now) {
       drawPortChrome(usbC, zt);
     }
     drawSparkline(frame, (int)r.x, (int)r.y, (int)r.w, (int)r.h, data, color);
-    tft.push(frame);
+    drawModeToast();
+  tft.push(frame);
     return;
   }
 
@@ -577,6 +671,7 @@ static void drawFrame(uint32_t now) {
     drawSparkline(frame, (int)r.x, (int)r.y, (int)r.w, (int)r.h, usbC ? histC : histA,
                   usbC ? COL_YELLOW : COL_MAGENTA);
   }
+  drawModeToast();
   tft.push(frame);
 }
 
@@ -780,7 +875,7 @@ static void handleRoot() {
            "protocol %s<br>"
            "session %.0f mWh (%.3f Wh) &nbsp; peak %.1f W</div>"
            "<div class=card class=g>MQTT %s &nbsp; Wi‑Fi %s (%d dBm)</div>"
-           "<p style=color:#666>Auto-refresh 2s — icon on device lights while you are here.</p>"
+           "<p><a href=/radio style=color:#0ff>radio</a> · <a href=/help style=color:#0ff>help</a></p><p style=color:#666>Auto-refresh 2s — icon on device lights while you are here.</p>"
            "</body></html>",
            snap.power_total_w, charging ? "CHARGING" : "IDLE", snap.vin_mv / 1000.0f,
            snap.vout_mv / 1000.0f, snap.ic_ma / 1000.0f, snap.power_c_w, snap.ia_ma / 1000.0f,
@@ -814,11 +909,57 @@ static void handleApi() {
   web.send(200, "application/json", json);
 }
 
+static void handleRadio() {
+  noteWebHit();
+  char body[1600];
+  char apJson[768];
+  RadioTools::jsonStatus(apJson, sizeof(apJson));
+  const char* modeName = (mode == Mode::Radio) ? "radio" : "charger";
+  snprintf(body, sizeof(body),
+           "<!doctype html><html><head><meta charset=utf-8>"
+           "<meta http-equiv=refresh content=3>"
+           "<meta name=viewport content="width=device-width,initial-scale=1">"
+           "<title>GEEK Radio</title>"
+           "<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:1.2rem}"
+           "h1{font-size:1.2rem;color:#0ff}a{color:#0ff}.card{background:#1c1c1c;padding:1rem;"
+           "border-radius:10px;margin:.6rem 0} pre{white-space:pre-wrap;color:#aaa;font-size:.85rem}"
+           "</style></head><body>"
+           "<h1>Radio</h1><p>Device mode: <b>%s</b> — "
+           "<a href=/>charger</a> · <a href=/help>help</a></p>"
+           "<div class=card><pre>%s</pre></div>"
+           "<p style=color:#666>AP list from Wi‑Fi beacon scan (own RF view). "
+           "Triple‑click BOOT on device to toggle Radio.</p>"
+           "</body></html>",
+           modeName, apJson);
+  web.send(200, "text/html", body);
+}
+
+static void handleHelp() {
+  noteWebHit();
+  web.send(200, "text/html",
+           "<!doctype html><html><head><meta charset=utf-8>"
+           "<meta name=viewport content="width=device-width,initial-scale=1">"
+           "<title>GEEK Help</title>"
+           "<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:1.2rem}"
+           "h1{color:#0ff}li{margin:.35rem 0}a{color:#0ff}.card{background:#1c1c1c;padding:1rem;"
+           "border-radius:10px}</style></head><body>"
+           "<h1>BOOT controls</h1><div class=card><ul>"
+           "<li><b>Short</b> — next page (charger zoom / radio pages)</li>"
+           "<li><b>Double</b> — Session history (charger) or previous radio page</li>"
+           "<li><b>Triple</b> — toggle Charger ↔ Radio</li>"
+           "<li><b>Long</b> — clear session (charger) or rescan (radio)</li>"
+           "</ul></div>"
+           "<p><a href=/>charger</a> · <a href=/radio>radio</a> · <a href=/api>api</a></p>"
+           "</body></html>");
+}
+
 static void setupWeb() {
 #if HAS_WIFI
   if (webStarted) return;
   web.on("/", handleRoot);
   web.on("/api", handleApi);
+  web.on("/radio", handleRadio);
+  web.on("/help", handleHelp);
   web.onNotFound([]() {
     noteWebHit();
     web.send(404, "text/plain", "not found");
@@ -886,10 +1027,13 @@ void setup() {
   delay(200);
   tft.fillScreen(COL_BLACK);
 
+  RadioTools::begin();
   bootBtn.attachClick(onBootClick);
   bootBtn.attachDoubleClick(onBootDouble);
+  bootBtn.attachMultiClick(onBootMulti);
   bootBtn.attachLongPressStart(onBootLong);
   bootBtn.setLongPressIntervalMs(800);
+  bootBtn.setClickTicks(450);
   lastActivityMs = millis();
   ipShowUntilMs = millis() + 90000;  // IP hint for 90s after boot
 
@@ -906,6 +1050,7 @@ void setup() {
 void loop() {
   bootBtn.tick();
   const uint32_t now = millis();
+  RadioTools::tick(now);
 
   if (now - lastBeatMs >= 2000) {
     lastBeatMs = now;
@@ -946,7 +1091,22 @@ void loop() {
   const uint32_t uiPeriod = anim.busy() ? 33 : kUiMs;  // ~30fps while zooming
   if (now - lastUiMs >= uiPeriod) {
     lastUiMs = now;
-    if (!charger.present()) {
+    if (mode == Mode::Radio) {
+      // Keep session stats warm if charger is up, but UI is radio
+      if (charger.present() && charger.readSnapshot(snap)) {
+        pushHistory();
+        updateSession(now);
+        if (wifiEnabled && now - lastMqttMs >= kMqttMs) {
+          lastMqttMs = now;
+          publishMqtt();
+        }
+        if (now - lastSdMs >= kSdLogMs) {
+          lastSdMs = now;
+          logSd(now);
+        }
+      }
+      drawFrame(now);
+    } else if (!charger.present()) {
       drawMissing();
     } else if (charger.readSnapshot(snap)) {
       if (snap.protocol != lastProtocol) {
