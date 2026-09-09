@@ -166,6 +166,7 @@ static void saveSessionPersist(bool force = false) {
   if (n == sizeof(blob)) {
     sessionDirty = false;
     lastSessionSaveMs = now;
+    captureSavedFromBlob(blob);
     Serial.printf("Session saved (%u B)\n", (unsigned)n);
   } else {
     Serial.println("Session save short write");
@@ -203,7 +204,9 @@ static void loadSessionPersist() {
   memcpy(histC, blob.histC, sizeof(histC));
   memcpy(histA, blob.histA, sizeof(histA));
   sessionDirty = false;
-  Serial.printf("Session restored: %.1f mWh  peak %.1f W  hist %u\n", session.mwh, session.peakW,
+  captureSavedFromBlob(blob);
+  Serial.printf("Session restored: %.1f mWh  peak %.1f W  hist %u
+", session.mwh, session.peakW,
                 (unsigned)histCount);
 }
 
@@ -213,6 +216,82 @@ static void eraseSessionPersist() {
   sessionPrefs.end();
   sessionDirty = false;
   Serial.println("Session NVS erased");
+}
+
+// Snapshot shown on the History "SAVED" face (last flash write / last cleared session)
+struct SavedView {
+  bool ok = false;
+  uint32_t chargedMs = 0;
+  double mwh = 0;
+  float peakW = 0;
+  float peakC_W = 0;
+  float peakA_W = 0;
+  float peakC_W_A = 0;
+  float peakA_W_A = 0;
+  uint16_t peakVoutMv = 0;
+  uint32_t histPeriodMs = 250;
+  size_t histCount = 0;
+  float histC[kHistMax] = {};
+  float histA[kHistMax] = {};
+} savedView;
+
+enum class HistFace : uint8_t { Session = 0, Saved = 1 };
+HistFace histFace = HistFace::Session;
+uint32_t histFaceSinceMs = 0;
+static constexpr uint32_t kHistFaceFlipMs = 60000;  // 1 minute
+
+static float savedAvgW() {
+  if (!savedView.ok || savedView.chargedMs < 50 || savedView.mwh <= 0) return 0.f;
+  return static_cast<float>(savedView.mwh * 3600.0 / savedView.chargedMs);
+}
+
+static void captureSavedFromLive() {
+  savedView.ok = (session.startMs != 0 || session.mwh > 0.01 || histCount > 1);
+  if (!savedView.ok) return;
+  savedView.chargedMs = session.chargedMs;
+  savedView.mwh = session.mwh;
+  savedView.peakW = session.peakW;
+  savedView.peakC_W = session.peakC_W;
+  savedView.peakA_W = session.peakA_W;
+  savedView.peakC_W_A = session.peakC_W_A;
+  savedView.peakA_W_A = session.peakA_W_A;
+  savedView.peakVoutMv = session.peakVoutMv;
+  savedView.histPeriodMs = histPeriodMs;
+  savedView.histCount = histCount;
+  memcpy(savedView.histC, histC, sizeof(histC));
+  memcpy(savedView.histA, histA, sizeof(histA));
+}
+
+static void captureSavedFromBlob(const PersistedSession& blob) {
+  savedView.ok = true;
+  savedView.chargedMs = blob.chargedMs;
+  savedView.mwh = blob.mwh;
+  savedView.peakW = blob.peakW;
+  savedView.peakC_W = blob.peakC_W;
+  savedView.peakA_W = blob.peakA_W;
+  savedView.peakC_W_A = blob.peakC_W_A;
+  savedView.peakA_W_A = blob.peakA_W_A;
+  savedView.peakVoutMv = blob.peakVoutMv;
+  savedView.histPeriodMs = blob.histPeriodMs ? blob.histPeriodMs : 250;
+  savedView.histCount = blob.histCount;
+  if (savedView.histCount > kHistMax) savedView.histCount = kHistMax;
+  memcpy(savedView.histC, blob.histC, sizeof(savedView.histC));
+  memcpy(savedView.histA, blob.histA, sizeof(savedView.histA));
+}
+
+static void resetHistFaceTimer(uint32_t now = 0) {
+  if (now == 0) now = millis();
+  histFaceSinceMs = now;
+}
+
+static void tickHistFace(uint32_t now) {
+  if (mode != Mode::Charger || page != Page::History) return;
+  if (histFaceSinceMs == 0) histFaceSinceMs = now;
+  if (now - histFaceSinceMs < kHistFaceFlipMs) return;
+  histFace = (histFace == HistFace::Session) ? HistFace::Saved : HistFace::Session;
+  // Skip empty SAVED face
+  if (histFace == HistFace::Saved && !savedView.ok) histFace = HistFace::Session;
+  histFaceSinceMs = now;
 }
 
 struct Anim {
@@ -269,12 +348,15 @@ static void touchActivity() {
 }
 
 static void clearSession() {
+  captureSavedFromLive();  // keep last run on SAVED face
   session = Session{};
   histCount = 0;
   histPeriodMs = 250;
   memset(histC, 0, sizeof(histC));
   memset(histA, 0, sizeof(histA));
   eraseSessionPersist();
+  histFace = HistFace::Session;
+  resetHistFaceTimer();
   Serial.println("Session cleared");
 }
 
@@ -373,16 +455,17 @@ static void formatDuration(uint32_t ms, char* out, size_t n) {
 }
 
 static void drawSparkline(Adafruit_GFX& g, int x, int y, int w, int h, const float* data,
-                          uint16_t color) {
+                          uint16_t color, size_t count = 0) {
+  if (count == 0) count = histCount;
   g.drawRect(x, y, w, h, COL_DARKGREY);
-  if (histCount < 2 || w < 4 || h < 4) return;
+  if (count < 2 || w < 4 || h < 4) return;
   float mx = 0.1f;
-  for (size_t i = 0; i < histCount; i++) {
+  for (size_t i = 0; i < count; i++) {
     if (data[i] > mx) mx = data[i];
   }
   int prevX = x + 1, prevY = y + h - 2;
-  const size_t denom = histCount > 1 ? histCount - 1 : 1;
-  for (size_t i = 0; i < histCount; i++) {
+  const size_t denom = count > 1 ? count - 1 : 1;
+  for (size_t i = 0; i < count; i++) {
     const int px = x + 1 + (int)((w - 3) * i / denom);
     const int py = y + h - 2 - (int)((h - 4) * (data[i] / mx));
     if (i > 0) g.drawLine(prevX, prevY, px, py, color);
@@ -477,6 +560,8 @@ static void onBootDouble() {
   } else {
     anim.kind = Anim::Idle;
     page = Page::History;
+    histFace = HistFace::Session;
+    resetHistFaceTimer();
   }
 }
 
@@ -492,6 +577,7 @@ static void finishAnim(uint32_t now) {
   if (!anim.busy()) return;
   if (anim.rawT(now) < 1.f) return;
   page = anim.to;
+  if (page == Page::History) resetHistFaceTimer();
   if (anim.kind == Anim::ZoomOut) {
     if (anim.from == Page::UsbC) seenUsbC = true;
     if (anim.from == Page::UsbA) seenUsbA = true;
@@ -644,24 +730,37 @@ static void drawPortChrome(bool usbC, float alpha) {
 static void drawHistoryPage() {
   frame.fillScreen(COL_BLACK);
   const int w = frame.width();
-  gfxText(frame, 4, 2, "SESSION", COL_CYAN, COL_BLACK, 1);
+  const bool showSaved = (histFace == HistFace::Saved && savedView.ok);
+  gfxText(frame, 4, 2, showSaved ? "SAVED" : "SESSION", showSaved ? COL_ORANGE : COL_CYAN,
+          COL_BLACK, 1);
   drawConnIcons(frame, w - 2, 1, false);
 
   char buf[40], dur[16], ip[20];
-  if (session.startMs != 0 || session.mwh > 0.01) {
-    formatDuration(session.chargedMs, dur, sizeof(dur));
+  const uint32_t charged = showSaved ? savedView.chargedMs : session.chargedMs;
+  const double mwh = showSaved ? savedView.mwh : session.mwh;
+  const float peakW = showSaved ? savedView.peakW : session.peakW;
+  const float avgW = showSaved ? savedAvgW() : sessionAvgW();
+  const float peakC_W = showSaved ? savedView.peakC_W : session.peakC_W;
+  const float peakA_W = showSaved ? savedView.peakA_W : session.peakA_W;
+  const float peakC_W_A = showSaved ? savedView.peakC_W_A : session.peakC_W_A;
+  const float peakA_W_A = showSaved ? savedView.peakA_W_A : session.peakA_W_A;
+  const uint16_t peakVoutMv = showSaved ? savedView.peakVoutMv : session.peakVoutMv;
+  const float* sparkC = showSaved ? savedView.histC : histC;
+  const float* sparkA = showSaved ? savedView.histA : histA;
+  const size_t sparkN = showSaved ? savedView.histCount : histCount;
+
+  if ((!showSaved && (session.startMs != 0 || session.mwh > 0.01)) ||
+      (showSaved && savedView.ok)) {
+    formatDuration(charged, dur, sizeof(dur));
   } else {
     snprintf(dur, sizeof(dur), "--");
   }
   ipText(ip, sizeof(ip));
   gfxText(frame, 4, 14, dur, COL_WHITE, COL_BLACK, 1);
-  // IP always available here (handy for the web UI)
   gfxText(frame, frame.width() - 4, 14, ip, COL_CYAN, COL_BLACK, 1, false, true);
 
-  // Peak = max instantaneous W; Avg = energy / charged time (not wall clock)
-  const float wh = session.mwh / 1000.0f;
-  const float avgW = sessionAvgW();
-  snprintf(buf, sizeof(buf), "%.1fW", session.peakW);
+  const float wh = mwh / 1000.0f;
+  snprintf(buf, sizeof(buf), "%.1fW", peakW);
   gfxText(frame, 4, 28, "PEAK", COL_LIGHTGREY, COL_BLACK, 1);
   gfxText(frame, 4, 40, buf, COL_WHITE, COL_BLACK, 2);
 
@@ -673,18 +772,27 @@ static void drawHistoryPage() {
   gfxText(frame, 168, 28, "ENERGY", COL_LIGHTGREY, COL_BLACK, 1);
   gfxText(frame, 168, 40, buf, COL_WHITE, COL_BLACK, 1);
 
-  // W with amps at that same peak-W sample (not independent peak A)
-  snprintf(buf, sizeof(buf), "C pk %.1fW @%.2fA", session.peakC_W, session.peakC_W_A);
+  snprintf(buf, sizeof(buf), "C pk %.1fW @%.2fA", peakC_W, peakC_W_A);
   gfxText(frame, 4, 64, buf, COL_YELLOW, COL_BLACK, 1);
-  drawSparkline(frame, 4, 76, 110, 22, histC, COL_YELLOW);
+  drawSparkline(frame, 4, 76, 110, 22, sparkC, COL_YELLOW, sparkN);
 
-  snprintf(buf, sizeof(buf), "A pk %.1fW @%.2fA", session.peakA_W, session.peakA_W_A);
+  snprintf(buf, sizeof(buf), "A pk %.1fW @%.2fA", peakA_W, peakA_W_A);
   gfxText(frame, 122, 64, buf, COL_MAGENTA, COL_BLACK, 1);
-  drawSparkline(frame, 122, 76, 110, 22, histA, COL_MAGENTA);
+  drawSparkline(frame, 122, 76, 110, 22, sparkA, COL_MAGENTA, sparkN);
 
-  snprintf(buf, sizeof(buf), "Vout pk %.2fV", session.peakVoutMv / 1000.0f);
+  snprintf(buf, sizeof(buf), "Vout pk %.2fV", peakVoutMv / 1000.0f);
   gfxText(frame, 4, 104, buf, COL_LIGHTGREY, COL_BLACK, 1);
-  gfxText(frame, 4, 118, "long=clear  x3=radio", COL_LIGHTGREY, COL_BLACK, 1);
+
+  // Flip progress (Session pages only) — thin bar along bottom
+  const uint32_t now = millis();
+  if (histFaceSinceMs == 0) histFaceSinceMs = now;
+  float pt = (now - histFaceSinceMs) / (float)kHistFaceFlipMs;
+  if (pt < 0) pt = 0;
+  if (pt > 1) pt = 1;
+  frame.drawRect(4, 128, w - 8, 4, COL_DARKGREY);
+  frame.fillRect(4, 128, (int)((w - 8) * pt), 4, showSaved ? COL_ORANGE : COL_CYAN);
+  gfxText(frame, 4, 118, showSaved ? "flash snapshot  auto-flip 1m" : "live session  auto-flip 1m",
+          COL_LIGHTGREY, COL_BLACK, 1);
 }
 
 static void drawModeToast() {
@@ -1172,6 +1280,7 @@ void loop() {
   bootBtn.tick();
   const uint32_t now = millis();
   RadioTools::tick(now);
+  tickHistFace(now);
   saveSessionPersist(false);
 
   if (now - lastBeatMs >= 2000) {
