@@ -54,6 +54,10 @@ bool seenUsbA = false;
 static constexpr uint32_t kWebActiveMs = 8000;
 bool webStarted = false;
 
+// Real loop-load metrics for Radio SYSTEM page (no fake CPU%)
+uint32_t g_lastLoopUs = 0;
+uint16_t g_loopsPerSec = 0;
+
 bool nightDim = false;
 int blLevel = kBlFull;
 Page page = Page::Main;
@@ -385,7 +389,7 @@ static void updateSession(uint32_t now) {
       histCount = 0;
       histPeriodMs = 250;
     } else if (!session.active) {
-      // Resume after pause — skip idle gap for energy / chargedMs
+      // Resume after pause - skip idle gap for energy / chargedMs
       session.lastSampleMs = now;
     } else {
       const uint32_t dt = now - session.lastSampleMs;
@@ -663,7 +667,7 @@ static void drawConnIcons(Adafruit_GFX& g, int16_t rightX, int16_t y, bool withI
 }
 
 
-// Shared top chrome — mode + crumbs + icons (continuity across Charger/Radio)
+// Shared top chrome - mode + crumbs + icons (continuity across Charger/Radio)
 static constexpr int kStatusBarH = 12;
 
 static void drawStatusBar(bool withIp) {
@@ -884,8 +888,17 @@ static void drawModeToast() {
 static void drawRadioFrame() {
   const bool wifiUp = wifiEnabled && WiFi.status() == WL_CONNECTED;
   const int8_t rssi = wifiUp ? (int8_t)WiFi.RSSI() : (int8_t)-127;
+  const bool mqttOk =
+#if HAS_WIFI && defined(MQTT_HOST)
+      mqtt.connected();
+#else
+      false;
+#endif
+  const bool webOk = webStarted;
   if (radioPage == RadioPage::BleScan) RadioTools::setFocus(RadioTools::Focus::Ble);
-  else if (radioPage == RadioPage::WifiScan || radioPage == RadioPage::Waterfall)
+  else if (radioPage == RadioPage::Waterfall)
+    RadioTools::setFocus(RadioTools::Focus::Waterfall);
+  else if (radioPage == RadioPage::WifiScan)
     RadioTools::setFocus(RadioTools::Focus::Wifi);
   else RadioTools::setFocus(RadioTools::Focus::Idle);
 
@@ -900,7 +913,8 @@ static void drawRadioFrame() {
       RadioTools::drawBleList(frame, COL_WHITE, COL_LIGHTGREY, COL_GREEN, COL_BLACK);
       break;
     case RadioPage::Sys:
-      RadioTools::drawSys(frame, COL_WHITE, COL_LIGHTGREY, COL_CYAN, COL_BLACK, wifiUp, rssi);
+      RadioTools::drawSys(frame, COL_WHITE, COL_LIGHTGREY, COL_CYAN, COL_BLACK, wifiUp, rssi, mqttOk,
+                          webOk, g_lastLoopUs, g_loopsPerSec);
       break;
     case RadioPage::Help:
     default:
@@ -914,7 +928,7 @@ static void drawRadioFrame() {
 }
 
 static void drawFrame(uint32_t now) {
-  // Radio is a separate app shell — never fall through into charger chrome
+  // Radio is a separate app shell - never fall through into charger chrome
   if (mode == Mode::Radio) {
     drawRadioFrame();
     return;
@@ -1195,8 +1209,8 @@ static void handleRoot() {
            "USB-A %.2f A / %.2f W<br>"
            "protocol %s<br>"
            "session %.0f mWh (%.3f Wh) &nbsp; peak %.1f W</div>"
-           "<div class=card class=g>MQTT %s &nbsp; Wi‑Fi %s (%d dBm)</div>"
-           "<p><a href=/radio style=color:#0ff>radio</a> · <a href=/help style=color:#0ff>help</a></p><p style=color:#666>Auto-refresh 2s — icon on device lights while you are here.</p>"
+           "<div class=card class=g>MQTT %s &nbsp; Wi-Fi %s (%d dBm)</div>"
+           "<p><a href=/radio style=color:#0ff>radio</a> - <a href=/help style=color:#0ff>help</a></p><p style=color:#666>Auto-refresh 2s - icon on device lights while you are here.</p>"
            "</body></html>",
            snap.power_total_w, charging ? "CHARGING" : "IDLE", snap.vin_mv / 1000.0f,
            snap.vout_mv / 1000.0f, snap.ic_ma / 1000.0f, snap.power_c_w, snap.ia_ma / 1000.0f,
@@ -1245,11 +1259,11 @@ static void handleRadio() {
            "h1{font-size:1.2rem;color:#0ff}a{color:#0ff}.card{background:#1c1c1c;padding:1rem;"
            "border-radius:10px;margin:.6rem 0} pre{white-space:pre-wrap;color:#aaa;font-size:.85rem}"
            "</style></head><body>"
-           "<h1>Radio</h1><p>Device mode: <b>%s</b> — "
-           "<a href=/>charger</a> · <a href=/help>help</a></p>"
+           "<h1>Radio</h1><p>Device mode: <b>%s</b> - "
+           "<a href=/>charger</a> - <a href=/help>help</a></p>"
            "<div class=card><pre>%s</pre></div>"
-           "<p style=color:#666>AP list from Wi‑Fi beacon scan (own RF view). "
-           "Triple‑click BOOT on device to toggle Radio.</p>"
+           "<p style=color:#666>AP list from Wi-Fi beacon scan (own RF view). "
+           "Triple-click BOOT on device to toggle Radio.</p>"
            "</body></html>",
            modeName, apJson);
   web.send(200, "text/html", body);
@@ -1265,12 +1279,12 @@ static void handleHelp() {
            "h1{color:#0ff}li{margin:.35rem 0}a{color:#0ff}.card{background:#1c1c1c;padding:1rem;"
            "border-radius:10px}</style></head><body>"
            "<h1>BOOT controls</h1><div class=card><ul>"
-           "<li><b>Short</b> — next page (charger zoom / radio pages)</li>"
-           "<li><b>Double</b> — Session history (charger) or previous radio page</li>"
-           "<li><b>Triple</b> — toggle Charger ↔ Radio</li>"
-           "<li><b>Long</b> — clear session (charger) or rescan (radio)</li>"
+           "<li><b>Short</b> - next page (charger zoom / radio pages)</li>"
+           "<li><b>Double</b> - Session history (charger) or previous radio page</li>"
+           "<li><b>Triple</b> - toggle Charger <-> Radio</li>"
+           "<li><b>Long</b> - clear session (charger) or rescan (radio)</li>"
            "</ul></div>"
-           "<p><a href=/>charger</a> · <a href=/radio>radio</a> · <a href=/api>api</a></p>"
+           "<p><a href=/>charger</a> - <a href=/radio>radio</a> - <a href=/api>api</a></p>"
            "</body></html>");
 }
 
@@ -1371,6 +1385,7 @@ void setup() {
 }
 
 void loop() {
+  const uint32_t loopT0 = micros();
   bootBtn.tick();
   const uint32_t now = millis();
   RadioTools::tick(now);
@@ -1453,5 +1468,16 @@ void loop() {
     } else {
       drawMissing();
     }
+  }
+
+  g_lastLoopUs = micros() - loopT0;
+  static uint32_t lpsCount = 0;
+  static uint32_t lpsWindowMs = 0;
+  lpsCount++;
+  if (lpsWindowMs == 0) lpsWindowMs = now;
+  if (now - lpsWindowMs >= 1000) {
+    g_loopsPerSec = (uint16_t)(lpsCount > 65535 ? 65535 : lpsCount);
+    lpsCount = 0;
+    lpsWindowMs = now;
   }
 }

@@ -9,9 +9,9 @@ namespace RadioTools {
 static constexpr size_t kMaxAps = 8;
 static constexpr size_t kMaxBle = 8;
 static constexpr size_t kChannels = 14;  // 1..13 used
-static constexpr size_t kHeatCols = 56;
+static constexpr size_t kHeatCols = 52;
 
-enum class Focus : uint8_t { Idle = 0, Wifi = 1, Ble = 2 };
+enum class Focus : uint8_t { Idle = 0, Wifi = 1, Ble = 2, Waterfall = 3 };
 
 struct ApRow {
   char ssid[18];
@@ -45,8 +45,9 @@ void drawWaterfall(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t hot, uin
                    uint16_t bg);
 void drawBleList(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t bar, uint16_t bg);
 void drawHelp(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t accent, uint16_t bg);
-void drawSys(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t accent, uint16_t bg,
-             bool wifiUp, int8_t wifiRssi);
+// Dashboard under status bar: Wi-Fi/MQTT/web, heap/PSRAM, uptime, loop load, AP/BLE counts.
+void drawSys(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t accent, uint16_t bg, bool wifiUp,
+             int8_t wifiRssi, bool mqttOk, bool webOk, uint32_t loopUs, uint16_t loopsPerSec);
 
 size_t jsonStatus(char* out, size_t n);
 

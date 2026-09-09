@@ -63,10 +63,12 @@ Rebuild with latest `main` (needs `CGRAM_OFFSET` + inversion for the 135×240 ST
 ## Build & flash (PlatformIO)
 
 ```bash
-pio run -e esp32-s3-geek
+git pull
 pio run -e esp32-s3-geek -t upload
 pio device monitor -b 115200
 ```
+
+Or build only: `pio run -e esp32-s3-geek`. Flash reminder: `git pull && pio run -e esp32-s3-geek -t upload`.
 
 If upload fails: hold **BOOT**, plug USB-A into the PC, release BOOT (download mode), then upload again. Enable USB CDC is already set in `platformio.ini`.
 
@@ -87,14 +89,26 @@ Reserved GPIOs for a future case: `PIN_BTN_LEFT=1`, `PIN_BTN_RIGHT=2`, `PIN_HAPT
 - **Long:** clear session (new connection)
 - **Idle dim:** after 90s, backlight to 50% (any press restores)
 
-**Radio mode** (Wi‑Fi tools — beacon scan / channel heat; not an attack suite)
+**Radio mode** (Wi-Fi tools - beacon scan / channel heat; not an attack suite)
 
-- **Short:** next page — Wi‑Fi APs → Waterfall → BLE → System → Help → …
+- **Short:** next page - Wi-Fi APs -> Waterfall -> BLE -> System -> Help -> ...
 - **Double:** previous radio page
 - **Triple:** back to **Charger**
-- **Long:** force Wi‑Fi rescan
+- **Long:** force Wi-Fi rescan
 
-Web: `/` charger · `/radio` AP JSON view · `/help` button map · `/api` metrics
+**System page** is a compact dashboard under the status bar: Wi-Fi SSID/RSSI bar/channel/IP, MQTT + web server status, heap (free + min) and PSRAM bars, uptime, real loop load (last loop us + loops/s - not fake CPU%), and AP/BLE scan counts. Cyan/yellow/magenta accents match the charger UI.
+
+**Waterfall** rolls channels 1-13 (~600 ms dwell) with per-channel `WiFi.scanNetworks` when the API allows (beacon/scan only - no promiscuous sniff). Heat columns scroll each dwell; color by RSSI intensity (cool dim -> hot magenta/cyan) with open-vs-encrypted tint from scan `encryptionType`. Caption is **ASCII-only** (Adafruit font). Shows dwell CH and hottest AP on that channel.
+
+Web: `/` charger - `/radio` AP JSON view - `/help` button map - `/api` metrics
+
+SSI bar/channel/IP, MQTT + web server status, heap (free + min) and PSRAM bars, uptime, real loop load (last loop us + loops/s - not fake CPU%), and AP/BLE scan counts. Cyan/yellow/magenta accents match the charger UI.
+
+**Waterfall** rolls channels 1-13 (~600 ms dwell) with per-channel `WiFi.scanNetworks` when the API allows (beacon/scan only - no promiscuous sniff). Heat columns scroll each dwell; color by RSSI intensity (cool dim -> hot magenta/cyan) with open-vs-encrypted tint from scan `encryptionType`. Caption is **ASCII-only** (Adafruit font). Shows dwell CH and hottest AP on that channel.
+
+Reserved GPIOs for a future case: `PIN_BTN_LEFT=1`, `PIN_BTN_RIGHT=2`, `PIN_HAPTIC=13` (also noted under Controls).
+
+Web: `/` charger - `/radio` AP JSON view - `/help` button map - `/api` metrics
 
 USB-C/A pages show a session-length sparkline (grows / rebins to fit) with a time span label.
 
