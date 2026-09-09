@@ -487,6 +487,9 @@ static void startZoom(Anim::Kind kind, Page from, Page to) {
   anim.startMs = millis();
 }
 
+static void drawRadioFrame();
+static void drawFrame(uint32_t now);
+
 static void showModeToast(const char* label) {
   strncpy(modeToast, label, sizeof(modeToast) - 1);
   modeToast[sizeof(modeToast) - 1] = 0;
@@ -501,8 +504,10 @@ static void enterRadioMode() {
   if (WiFi.getMode() == WIFI_MODE_NULL) WiFi.mode(WIFI_STA);
   RadioTools::enter();
   RadioTools::requestScan();
+  RadioTools::setFocus(RadioTools::Focus::Wifi);
   showModeToast("RADIO");
   Serial.println("Mode: RADIO");
+  drawRadioFrame();  // paint immediately
 }
 
 static void enterChargerMode() {
@@ -513,6 +518,7 @@ static void enterChargerMode() {
   anim.kind = Anim::Idle;
   showModeToast("CHARGER");
   Serial.println("Mode: CHARGER");
+  drawFrame(millis());  // paint charger immediately
 }
 
 static void onBootClick() {
@@ -832,6 +838,12 @@ static void drawRadioFrame() {
 }
 
 static void drawFrame(uint32_t now) {
+  // Radio is a separate app shell — never fall through into charger chrome
+  if (mode == Mode::Radio) {
+    drawRadioFrame();
+    return;
+  }
+
   finishAnim(now);
   frame.fillScreen(COL_BLACK);
 
