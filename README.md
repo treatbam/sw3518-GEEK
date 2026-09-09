@@ -158,3 +158,7 @@ Firmware in this repo: MIT (unless you later vendor GPL code — keep attributio
 4. On boot the backlight should **blink 4 times** even before the LCD init. No blink ⇒ firmware not running / wrong board / flash failed.
 5. This build uses TinyUSB CDC (`ARDUINO_USB_MODE=0`) on the USB-A port (GPIO19/20).
 
+
+## Case (3D print)
+
+Parametric STLs for a GEEK shell with button / haptic / WS2812 pockets live in [`case/`](case/). Dry-fit before final print.
