@@ -18,7 +18,7 @@
 
 enum class Page : uint8_t { Main = 0, UsbC = 1, UsbA = 2, History = 3 };
 enum class Mode : uint8_t { Charger = 0, Radio = 1 };
-enum class RadioPage : uint8_t { WifiScan = 0, ChannelHeat = 1, Sys = 2, Help = 3, Count = 4 };
+enum class RadioPage : uint8_t { WifiScan = 0, Waterfall = 1, BleScan = 2, Sys = 3, Help = 4, Count = 5 };
 
 static constexpr size_t kHistMax = 120;
 static constexpr uint32_t kUiMs = 200;
@@ -238,7 +238,8 @@ struct SavedView {
 enum class HistFace : uint8_t { Session = 0, Saved = 1 };
 HistFace histFace = HistFace::Session;
 uint32_t histFaceSinceMs = 0;
-static constexpr uint32_t kHistFaceFlipMs = 60000;  // 1 minute
+static constexpr uint32_t kHistFaceSessionMs = 60000;  // live SESSION dwell
+static constexpr uint32_t kHistFaceSavedMs = 15000;    // SAVED dwell
 
 static float savedAvgW() {
   if (!savedView.ok || savedView.chargedMs < 50 || savedView.mwh <= 0) return 0.f;
@@ -287,10 +288,15 @@ static void resetHistFaceTimer(uint32_t now = 0) {
 static void tickHistFace(uint32_t now) {
   if (mode != Mode::Charger || page != Page::History) return;
   if (histFaceSinceMs == 0) histFaceSinceMs = now;
-  if (now - histFaceSinceMs < kHistFaceFlipMs) return;
-  histFace = (histFace == HistFace::Session) ? HistFace::Saved : HistFace::Session;
-  // Skip empty SAVED face
-  if (histFace == HistFace::Saved && !savedView.ok) histFace = HistFace::Session;
+  const uint32_t dwell =
+      (histFace == HistFace::Saved) ? kHistFaceSavedMs : kHistFaceSessionMs;
+  if (now - histFaceSinceMs < dwell) return;
+  if (histFace == HistFace::Session) {
+    if (savedView.ok) histFace = HistFace::Saved;
+    // else stay on SESSION
+  } else {
+    histFace = HistFace::Session;
+  }
   histFaceSinceMs = now;
 }
 
@@ -782,16 +788,7 @@ static void drawHistoryPage() {
 
   snprintf(buf, sizeof(buf), "Vout pk %.2fV", peakVoutMv / 1000.0f);
   gfxText(frame, 4, 104, buf, COL_LIGHTGREY, COL_BLACK, 1);
-
-  // Flip progress (Session pages only) — thin bar along bottom
-  const uint32_t now = millis();
-  if (histFaceSinceMs == 0) histFaceSinceMs = now;
-  float pt = (now - histFaceSinceMs) / (float)kHistFaceFlipMs;
-  if (pt < 0) pt = 0;
-  if (pt > 1) pt = 1;
-  frame.drawRect(4, 128, w - 8, 4, COL_DARKGREY);
-  frame.fillRect(4, 128, (int)((w - 8) * pt), 4, showSaved ? COL_ORANGE : COL_CYAN);
-  gfxText(frame, 4, 118, showSaved ? "flash snapshot  auto-flip 1m" : "live session  auto-flip 1m",
+  gfxText(frame, 4, 118, showSaved ? "SAVED 15s then back" : "long=clear  x3=radio",
           COL_LIGHTGREY, COL_BLACK, 1);
 }
 
@@ -806,19 +803,28 @@ static void drawModeToast() {
 static void drawRadioFrame() {
   const bool wifiUp = wifiEnabled && WiFi.status() == WL_CONNECTED;
   const int8_t rssi = wifiUp ? (int8_t)WiFi.RSSI() : (int8_t)-127;
+  // Focus Wi-Fi vs BLE scanning based on page
+  if (radioPage == RadioPage::BleScan) RadioTools::setFocus(RadioTools::Focus::Ble);
+  else if (radioPage == RadioPage::WifiScan || radioPage == RadioPage::Waterfall)
+    RadioTools::setFocus(RadioTools::Focus::Wifi);
+  else RadioTools::setFocus(RadioTools::Focus::Idle);
+
   switch (radioPage) {
     case RadioPage::WifiScan:
-      RadioTools::drawApList(frame, COL_WHITE, COL_DARKGREY, COL_YELLOW, COL_BLACK);
+      RadioTools::drawApList(frame, COL_WHITE, COL_LIGHTGREY, COL_YELLOW, COL_BLACK);
       break;
-    case RadioPage::ChannelHeat:
-      RadioTools::drawChannelHeat(frame, COL_WHITE, COL_DARKGREY, COL_MAGENTA, COL_BLACK);
+    case RadioPage::Waterfall:
+      RadioTools::drawWaterfall(frame, COL_WHITE, COL_LIGHTGREY, COL_MAGENTA, COL_CYAN, COL_BLACK);
+      break;
+    case RadioPage::BleScan:
+      RadioTools::drawBleList(frame, COL_WHITE, COL_LIGHTGREY, COL_GREEN, COL_BLACK);
       break;
     case RadioPage::Sys:
-      RadioTools::drawSys(frame, COL_WHITE, COL_DARKGREY, COL_CYAN, COL_BLACK, wifiUp, rssi);
+      RadioTools::drawSys(frame, COL_WHITE, COL_LIGHTGREY, COL_CYAN, COL_BLACK, wifiUp, rssi);
       break;
     case RadioPage::Help:
     default:
-      RadioTools::drawHelp(frame, COL_WHITE, COL_DARKGREY, COL_CYAN, COL_BLACK);
+      RadioTools::drawHelp(frame, COL_WHITE, COL_LIGHTGREY, COL_CYAN, COL_BLACK);
       break;
   }
   drawModeToast();

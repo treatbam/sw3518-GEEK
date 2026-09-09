@@ -84,7 +84,7 @@ Board selection in Arduino IDE (if you prefer): **ESP32S3 Dev Module**, flash 16
 
 **Radio mode** (Wi‑Fi tools — beacon scan / channel heat; not an attack suite)
 
-- **Short:** next page — Wi‑Fi Scan → Channel Heat → System → Help → …
+- **Short:** next page — Wi‑Fi APs → Waterfall → BLE → System → Help → …
 - **Double:** previous radio page
 - **Triple:** back to **Charger**
 - **Long:** force Wi‑Fi rescan
@@ -94,7 +94,7 @@ Web: `/` charger · `/radio` AP JSON view · `/help` button map · `/api` metric
 USB-C/A pages show a session-length sparkline (grows / rebins to fit) with a time span label.
 
 Session History (energy, peaks, sparklines) **persists across reboot** in flash (NVS). Long-hold clear wipes it.
-While on Session, the screen **auto-flips every 60s** between live SESSION and SAVED (last flash snapshot); Main/C/A are unchanged.
+While on Session, live SESSION shows for **60s**, then SAVED for **15s**, then repeats (no progress bar). Main/C/A are unchanged.
 
 
 ## Wi‑Fi / MQTT (Home Assistant)
