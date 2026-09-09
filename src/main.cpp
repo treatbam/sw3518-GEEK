@@ -131,6 +131,7 @@ struct PersistedSession {
 };
 
 static void markSessionDirty() { sessionDirty = true; }
+static void captureSavedFromBlob(const PersistedSession& blob);
 
 static void saveSessionPersist(bool force = false) {
   const uint32_t now = millis();
@@ -205,8 +206,7 @@ static void loadSessionPersist() {
   memcpy(histA, blob.histA, sizeof(histA));
   sessionDirty = false;
   captureSavedFromBlob(blob);
-  Serial.printf("Session restored: %.1f mWh  peak %.1f W  hist %u
-", session.mwh, session.peakW,
+  Serial.printf("Session restored: %.1f mWh  peak %.1f W  hist %u\n", session.mwh, session.peakW,
                 (unsigned)histCount);
 }
 
@@ -1145,7 +1145,7 @@ static void handleRadio() {
   snprintf(body, sizeof(body),
            "<!doctype html><html><head><meta charset=utf-8>"
            "<meta http-equiv=refresh content=3>"
-           "<meta name=viewport content="width=device-width,initial-scale=1">"
+           "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
            "<title>GEEK Radio</title>"
            "<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:1.2rem}"
            "h1{font-size:1.2rem;color:#0ff}a{color:#0ff}.card{background:#1c1c1c;padding:1rem;"
@@ -1165,7 +1165,7 @@ static void handleHelp() {
   noteWebHit();
   web.send(200, "text/html",
            "<!doctype html><html><head><meta charset=utf-8>"
-           "<meta name=viewport content="width=device-width,initial-scale=1">"
+           "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
            "<title>GEEK Help</title>"
            "<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:1.2rem}"
            "h1{color:#0ff}li{margin:.35rem 0}a{color:#0ff}.card{background:#1c1c1c;padding:1rem;"
@@ -1260,7 +1260,7 @@ void setup() {
   bootBtn.attachMultiClick(onBootMulti);
   bootBtn.attachLongPressStart(onBootLong);
   bootBtn.setLongPressIntervalMs(800);
-  bootBtn.setClickTicks(450);
+  bootBtn.setClickMs(450);
   lastActivityMs = millis();
   ipShowUntilMs = millis() + 90000;  // IP hint for 90s after boot
 
