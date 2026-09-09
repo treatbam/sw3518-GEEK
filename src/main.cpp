@@ -662,6 +662,79 @@ static void drawConnIcons(Adafruit_GFX& g, int16_t rightX, int16_t y, bool withI
   }
 }
 
+
+// Shared top chrome — mode + crumbs + icons (continuity across Charger/Radio)
+static constexpr int kStatusBarH = 12;
+
+static void drawStatusBar(bool withIp) {
+  const int w = frame.width();
+  frame.fillRect(0, 0, w, kStatusBarH, COL_BLACK);
+  frame.drawFastHLine(0, kStatusBarH - 1, w, COL_DIM);
+
+  const bool radio = (mode == Mode::Radio);
+  gfxText(frame, 2, 2, radio ? "RAD" : "CHG", radio ? COL_MAGENTA : COL_CYAN, COL_BLACK, 1);
+
+  // Crumbs
+  const char* crumbs[5];
+  int n = 0;
+  int active = 0;
+  if (radio) {
+    crumbs[n++] = "WIFI";
+    crumbs[n++] = "FALL";
+    crumbs[n++] = "BLE";
+    crumbs[n++] = "SYS";
+    crumbs[n++] = "HELP";
+    active = (int)radioPage;
+    if (active < 0) active = 0;
+    if (active >= n) active = n - 1;
+  } else {
+    crumbs[n++] = "MAIN";
+    crumbs[n++] = "C";
+    crumbs[n++] = "A";
+    crumbs[n++] = (page == Page::History && histFace == HistFace::Saved && savedView.ok) ? "SAV"
+                                                                                         : "SES";
+    if (page == Page::Main) active = 0;
+    else if (page == Page::UsbC) active = 1;
+    else if (page == Page::UsbA) active = 2;
+    else active = 3;  // History / SAVED
+  }
+
+  int x = 28;
+  for (int i = 0; i < n; i++) {
+    const bool on = (i == active);
+    const uint16_t col = on ? COL_WHITE : COL_DARKGREY;
+    gfxText(frame, x, 2, crumbs[i], col, COL_BLACK, 1);
+    const int tw = (int)strlen(crumbs[i]) * 6;
+    if (on) frame.drawFastHLine(x, 10, tw, radio ? COL_MAGENTA : COL_CYAN);
+    x += tw + 6;
+    if (i + 1 < n) {
+      gfxText(frame, x - 5, 2, ".", COL_DIM, COL_BLACK, 1);
+    }
+  }
+
+  drawConnIcons(frame, w - 2, 1, withIp);
+}
+
+static void drawLoadShareBar(int y) {
+  const float pc = snap.power_c_w;
+  const float pa = snap.power_a_w;
+  const float tot = pc + pa;
+  const int w = frame.width() - 8;
+  frame.drawRect(4, y, w, 6, COL_DARKGREY);
+  if (tot < 0.05f) {
+    gfxText(frame, 4, y - 10, "C/A share --", COL_DARKGREY, COL_BLACK, 1);
+    return;
+  }
+  int wc = (int)(w * (pc / tot) + 0.5f);
+  if (wc < 0) wc = 0;
+  if (wc > w) wc = w;
+  if (wc > 0) frame.fillRect(4, y, wc, 6, COL_YELLOW);
+  if (wc < w) frame.fillRect(4 + wc, y, w - wc, 6, COL_MAGENTA);
+  char buf[28];
+  snprintf(buf, sizeof(buf), "C %.0f%%  A %.0f%%", 100.f * pc / tot, 100.f * pa / tot);
+  gfxText(frame, 4, y - 10, buf, COL_LIGHTGREY, COL_BLACK, 1);
+}
+
 static void drawMissing() {
   frame.fillScreen(COL_BLACK);
   gfxText(frame, frame.width() / 2, frame.height() / 2 - 12, "SW3518 not found", COL_ORANGE,
@@ -673,32 +746,34 @@ static void drawMissing() {
 
 static void drawMainChrome() {
   const int w = frame.width();
-  const bool charging = snap.ia_ma > kLoadMa || snap.ic_ma > kLoadMa;
-  // Compact charge flag (left); icons (+ timed IP) on the right
-  gfxText(frame, 4, 2, charging ? "CHG" : "IDLE", charging ? COL_GREEN : COL_DARKGREY, COL_BLACK, 1);
-  drawConnIcons(frame, w - 2, 1, true);
+  drawStatusBar(true);
 
+  const bool charging = snap.ia_ma > kLoadMa || snap.ic_ma > kLoadMa;
   const bool flash = millis() < protoFlashUntil;
   const char* proto = SW3518::protocolName(snap.protocol);
-  if (flash) frame.fillRect(w / 2 - 50, 16, 100, 14, COL_YELLOW);
-  gfxText(frame, w / 2, 18, proto, flash ? COL_BLACK : COL_YELLOW, flash ? COL_YELLOW : COL_BLACK, 1,
+  // Small idle/chg under bar
+  gfxText(frame, 4, 14, charging ? "LIVE" : "IDLE", charging ? COL_GREEN : COL_LIGHTGREY, COL_BLACK, 1);
+  if (flash) frame.fillRect(w / 2 - 50, 14, 100, 12, COL_YELLOW);
+  gfxText(frame, w / 2, 14, proto, flash ? COL_BLACK : COL_YELLOW, flash ? COL_YELLOW : COL_BLACK, 1,
           true);
 
   char buf[40];
   snprintf(buf, sizeof(buf), "%.1fW", snap.power_total_w);
-  gfxText(frame, w / 2, 34, buf, COL_WHITE, COL_BLACK, 2, true);
+  gfxText(frame, w / 2, 28, buf, COL_WHITE, COL_BLACK, 2, true);
 
   snprintf(buf, sizeof(buf), "in %.1fV", snap.vin_mv / 1000.0f);
-  gfxText(frame, 4, 62, buf, COL_LIGHTGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 52, buf, COL_LIGHTGREY, COL_BLACK, 1);
   snprintf(buf, sizeof(buf), "out %.2fV", snap.vout_mv / 1000.0f);
-  gfxText(frame, w / 2, 62, buf, COL_LIGHTGREY, COL_BLACK, 1);
+  gfxText(frame, w / 2, 52, buf, COL_LIGHTGREY, COL_BLACK, 1);
 
-  gfxText(frame, 4, 78, "C", COL_YELLOW, COL_BLACK, 1);
+  gfxText(frame, 4, 66, "C", COL_YELLOW, COL_BLACK, 1);
   snprintf(buf, sizeof(buf), "%.2fA", snap.ic_ma / 1000.0f);
-  gfxText(frame, 14, 78, buf, COL_WHITE, COL_BLACK, 1);
-  gfxText(frame, w / 2, 78, "A", COL_MAGENTA, COL_BLACK, 1);
+  gfxText(frame, 14, 66, buf, COL_WHITE, COL_BLACK, 1);
+  gfxText(frame, w / 2, 66, "A", COL_MAGENTA, COL_BLACK, 1);
   snprintf(buf, sizeof(buf), "%.2fA", snap.ia_ma / 1000.0f);
-  gfxText(frame, w / 2 + 10, 78, buf, COL_WHITE, COL_BLACK, 1);
+  gfxText(frame, w / 2 + 10, 66, buf, COL_WHITE, COL_BLACK, 1);
+
+  drawLoadShareBar(86);
 
   if (session.startMs != 0 || session.mwh > 0.01) {
     char dur[16];
@@ -708,44 +783,44 @@ static void drawMainChrome() {
   } else {
     snprintf(buf, sizeof(buf), "idle  long=clear  x3=radio");
   }
-  gfxText(frame, 4, 94, buf, COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 96, buf, COL_LIGHTGREY, COL_BLACK, 1);
 }
 
 static void drawPortChrome(bool usbC, float alpha) {
   // alpha 0..1 fades in labels (simple: skip if low)
   if (alpha < 0.35f) return;
   const int w = frame.width();
+  drawStatusBar(true);
   const uint16_t accent = usbC ? COL_YELLOW : COL_MAGENTA;
   const float amps = (usbC ? snap.ic_ma : snap.ia_ma) / 1000.0f;
   const float watts = usbC ? snap.power_c_w : snap.power_a_w;
   const float peakA = usbC ? session.peakC_A : session.peakA_A;
 
-  gfxText(frame, 4, 2, usbC ? "USB-C" : "USB-A", accent, COL_BLACK, 1);
-  drawConnIcons(frame, w - 2, 1, true);
-  gfxText(frame, w / 2, 2, SW3518::protocolName(snap.protocol), COL_DARKGREY, COL_BLACK, 1, true);
+  gfxText(frame, 4, 14, usbC ? "USB-C" : "USB-A", accent, COL_BLACK, 1);
+  gfxText(frame, w / 2, 14, SW3518::protocolName(snap.protocol), COL_LIGHTGREY, COL_BLACK, 1, true);
 
   char buf[32];
   snprintf(buf, sizeof(buf), "%.2fW", watts);
-  gfxText(frame, w / 2, 18, buf, COL_WHITE, COL_BLACK, 2, true);
+  gfxText(frame, w / 2, 28, buf, COL_WHITE, COL_BLACK, 2, true);
 
   snprintf(buf, sizeof(buf), "%.2fV", snap.vout_mv / 1000.0f);
-  gfxText(frame, 4, 48, buf, COL_LIGHTGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 52, buf, COL_LIGHTGREY, COL_BLACK, 1);
   snprintf(buf, sizeof(buf), "%.2fA pk%.2f", amps, peakA);
-  gfxText(frame, w / 2 - 10, 48, buf, COL_WHITE, COL_BLACK, 1);
+  gfxText(frame, w / 2 - 10, 52, buf, COL_WHITE, COL_BLACK, 1);
 
   char span[24], label[36];
   formatDuration(session.startMs ? session.chargedMs : histSpanMs(), span, sizeof(span));
   snprintf(label, sizeof(label), "span %s", span);
-  gfxText(frame, 4, 62, label, COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 66, label, COL_LIGHTGREY, COL_BLACK, 1);
 }
 
 static void drawHistoryPage() {
   frame.fillScreen(COL_BLACK);
   const int w = frame.width();
   const bool showSaved = (histFace == HistFace::Saved && savedView.ok);
-  gfxText(frame, 4, 2, showSaved ? "SAVED" : "SESSION", showSaved ? COL_ORANGE : COL_CYAN,
+  drawStatusBar(false);
+  gfxText(frame, 4, 14, showSaved ? "SAVED" : "SESSION", showSaved ? COL_ORANGE : COL_CYAN,
           COL_BLACK, 1);
-  drawConnIcons(frame, w - 2, 1, false);
 
   char buf[40], dur[16], ip[20];
   const uint32_t charged = showSaved ? savedView.chargedMs : session.chargedMs;
@@ -768,33 +843,33 @@ static void drawHistoryPage() {
     snprintf(dur, sizeof(dur), "--");
   }
   ipText(ip, sizeof(ip));
-  gfxText(frame, 4, 14, dur, COL_WHITE, COL_BLACK, 1);
-  gfxText(frame, frame.width() - 4, 14, ip, COL_CYAN, COL_BLACK, 1, false, true);
+  gfxText(frame, 4, 26, dur, COL_WHITE, COL_BLACK, 1);
+  gfxText(frame, frame.width() - 4, 26, ip, COL_CYAN, COL_BLACK, 1, false, true);
 
   const float wh = mwh / 1000.0f;
   snprintf(buf, sizeof(buf), "%.1fW", peakW);
-  gfxText(frame, 4, 28, "PEAK", COL_LIGHTGREY, COL_BLACK, 1);
-  gfxText(frame, 4, 40, buf, COL_WHITE, COL_BLACK, 2);
+  gfxText(frame, 4, 38, "PEAK", COL_LIGHTGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 48, buf, COL_WHITE, COL_BLACK, 2);
 
   snprintf(buf, sizeof(buf), "%.1fW", avgW);
-  gfxText(frame, 88, 28, "AVG", COL_LIGHTGREY, COL_BLACK, 1);
-  gfxText(frame, 88, 40, buf, COL_WHITE, COL_BLACK, 2);
+  gfxText(frame, 88, 38, "AVG", COL_LIGHTGREY, COL_BLACK, 1);
+  gfxText(frame, 88, 48, buf, COL_WHITE, COL_BLACK, 2);
 
   snprintf(buf, sizeof(buf), "%.3fWh", wh);
-  gfxText(frame, 168, 28, "ENERGY", COL_LIGHTGREY, COL_BLACK, 1);
-  gfxText(frame, 168, 40, buf, COL_WHITE, COL_BLACK, 1);
+  gfxText(frame, 168, 38, "ENERGY", COL_LIGHTGREY, COL_BLACK, 1);
+  gfxText(frame, 168, 48, buf, COL_WHITE, COL_BLACK, 1);
 
   snprintf(buf, sizeof(buf), "C pk %.1fW @%.2fA", peakC_W, peakC_W_A);
-  gfxText(frame, 4, 64, buf, COL_YELLOW, COL_BLACK, 1);
-  drawSparkline(frame, 4, 76, 110, 22, sparkC, COL_YELLOW, sparkN);
+  gfxText(frame, 4, 68, buf, COL_YELLOW, COL_BLACK, 1);
+  drawSparkline(frame, 4, 78, 110, 20, sparkC, COL_YELLOW, sparkN);
 
   snprintf(buf, sizeof(buf), "A pk %.1fW @%.2fA", peakA_W, peakA_W_A);
-  gfxText(frame, 122, 64, buf, COL_MAGENTA, COL_BLACK, 1);
-  drawSparkline(frame, 122, 76, 110, 22, sparkA, COL_MAGENTA, sparkN);
+  gfxText(frame, 122, 68, buf, COL_MAGENTA, COL_BLACK, 1);
+  drawSparkline(frame, 122, 78, 110, 20, sparkA, COL_MAGENTA, sparkN);
 
   snprintf(buf, sizeof(buf), "Vout pk %.2fV", peakVoutMv / 1000.0f);
-  gfxText(frame, 4, 104, buf, COL_LIGHTGREY, COL_BLACK, 1);
-  gfxText(frame, 4, 118, showSaved ? "SAVED 15s then back" : "long=clear  x3=radio",
+  gfxText(frame, 4, 102, buf, COL_LIGHTGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 116, showSaved ? "SAVED 15s then back" : "long=clear  x3=radio",
           COL_LIGHTGREY, COL_BLACK, 1);
 }
 
@@ -809,7 +884,6 @@ static void drawModeToast() {
 static void drawRadioFrame() {
   const bool wifiUp = wifiEnabled && WiFi.status() == WL_CONNECTED;
   const int8_t rssi = wifiUp ? (int8_t)WiFi.RSSI() : (int8_t)-127;
-  // Focus Wi-Fi vs BLE scanning based on page
   if (radioPage == RadioPage::BleScan) RadioTools::setFocus(RadioTools::Focus::Ble);
   else if (radioPage == RadioPage::WifiScan || radioPage == RadioPage::Waterfall)
     RadioTools::setFocus(RadioTools::Focus::Wifi);
@@ -833,6 +907,8 @@ static void drawRadioFrame() {
       RadioTools::drawHelp(frame, COL_WHITE, COL_LIGHTGREY, COL_CYAN, COL_BLACK);
       break;
   }
+  // Overlay shared chrome so Radio matches Charger continuity
+  drawStatusBar(false);
   drawModeToast();
   tft.push(frame);
 }

@@ -216,20 +216,20 @@ bool scanning() { return wifiScanBusy || bleScanBusy; }
 
 void drawApList(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t bar, uint16_t bg) {
   g.fillScreen(bg);
-  text(g, 4, 2, "WI-FI APS", 0x07FF, bg, 1);
+  text(g, 4, 14, "WI-FI APS", 0x07FF, bg, 1);
   char line[36];
   snprintf(line, sizeof(line), wifiScanBusy ? "scan..." : "%u found", (unsigned)nAps);
-  text(g, 150, 2, line, dim, bg, 1);
+  text(g, 150, 14, line, dim, bg, 1);
 
   if (nAps == 0) {
-    text(g, 4, 50, "waiting for beacons", dim, bg, 1);
+    text(g, 4, 56, "waiting for beacons", dim, bg, 1);
     text(g, 4, 118, "short next  long rescan  x3 exit", dim, bg, 1);
     return;
   }
 
-  for (uint8_t i = 0; i < nAps && i < 6; i++) {
+  for (uint8_t i = 0; i < nAps && i < 5; i++) {
     const ApRow& a = aps[i];
-    const int y = 14 + (int)i * 18;
+    const int y = 28 + (int)i * 18;
     // rank
     snprintf(line, sizeof(line), "%u", (unsigned)(i + 1));
     text(g, 4, y, line, dim, bg, 1);
@@ -248,10 +248,10 @@ void drawApList(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t bar, uint16
 void drawWaterfall(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t hot, uint16_t accent,
                    uint16_t bg) {
   g.fillScreen(bg);
-  text(g, 4, 2, "WATERFALL", accent, bg, 1);
-  text(g, 130, 2, wifiScanBusy ? "hop..." : "ch 1-13", dim, bg, 1);
+  text(g, 4, 14, "WATERFALL", accent, bg, 1);
+  text(g, 130, 14, wifiScanBusy ? "hop..." : "ch 1-13", dim, bg, 1);
 
-  const int x0 = 22, y0 = 16, cw = 3, ch = 8;
+  const int x0 = 22, y0 = 28, cw = 3, ch = 7;
   for (size_t col = 0; col < kHeatCols; col++) {
     const size_t src = (heatHead + 1 + col) % kHeatCols;
     for (uint8_t c = 1; c <= 13; c++) {
@@ -281,20 +281,20 @@ void drawWaterfall(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t hot, uin
 
 void drawBleList(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t bar, uint16_t bg) {
   g.fillScreen(bg);
-  text(g, 4, 2, "BLE SCAN", 0x07E0, bg, 1);
+  text(g, 4, 14, "BLE SCAN", 0x07E0, bg, 1);
   char line[36];
   snprintf(line, sizeof(line), bleScanBusy ? "scan..." : "%u found", (unsigned)nBle);
-  text(g, 150, 2, line, dim, bg, 1);
+  text(g, 150, 14, line, dim, bg, 1);
 
   if (nBle == 0) {
-    text(g, 4, 50, "no advertisers yet", dim, bg, 1);
+    text(g, 4, 56, "no advertisers yet", dim, bg, 1);
     text(g, 4, 118, "short next  long rescan  x3 exit", dim, bg, 1);
     return;
   }
 
-  for (uint8_t i = 0; i < nBle && i < 6; i++) {
+  for (uint8_t i = 0; i < nBle && i < 5; i++) {
     const BleRow& b = bles[i];
-    const int y = 14 + (int)i * 18;
+    const int y = 28 + (int)i * 18;
     snprintf(line, sizeof(line), "%u", (unsigned)(i + 1));
     text(g, 4, y, line, dim, bg, 1);
     text(g, 16, y, b.name, fg, bg, 1);
@@ -309,34 +309,34 @@ void drawBleList(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t bar, uint1
 
 void drawHelp(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t accent, uint16_t bg) {
   g.fillScreen(bg);
-  text(g, 4, 2, "RADIO HELP", accent, bg, 1);
-  text(g, 4, 16, "pages: Wi-Fi / Fall / BLE / Sys", fg, bg, 1);
-  text(g, 4, 32, "short : next   double : prev", fg, bg, 1);
-  text(g, 4, 46, "long  : rescan", fg, bg, 1);
-  text(g, 4, 60, "triple: back to charger", fg, bg, 1);
-  text(g, 4, 80, "Wi-Fi = beacon APs + heat", dim, bg, 1);
-  text(g, 4, 94, "BLE = nearby advertisers", dim, bg, 1);
+  text(g, 4, 14, "RADIO HELP", accent, bg, 1);
+  text(g, 4, 28, "pages: Wi-Fi / Fall / BLE / Sys", fg, bg, 1);
+  text(g, 4, 42, "short : next   double : prev", fg, bg, 1);
+  text(g, 4, 54, "long  : rescan", fg, bg, 1);
+  text(g, 4, 66, "triple: back to charger", fg, bg, 1);
+  text(g, 4, 84, "Wi-Fi = beacon APs + heat", dim, bg, 1);
+  text(g, 4, 96, "BLE = nearby advertisers", dim, bg, 1);
   text(g, 4, 118, "web: /radio", accent, bg, 1);
 }
 
 void drawSys(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t accent, uint16_t bg, bool wifiUp,
              int8_t wifiRssi) {
   g.fillScreen(bg);
-  text(g, 4, 2, "SYSTEM", accent, bg, 1);
+  text(g, 4, 14, "SYSTEM", accent, bg, 1);
   char line[48];
   const uint32_t sec = millis() / 1000;
   snprintf(line, sizeof(line), "up %luh %lum", (unsigned long)(sec / 3600),
            (unsigned long)((sec / 60) % 60));
-  text(g, 4, 20, line, fg, bg, 1);
+  text(g, 4, 30, line, fg, bg, 1);
   snprintf(line, sizeof(line), "heap %u", (unsigned)ESP.getFreeHeap());
-  text(g, 4, 36, line, fg, bg, 1);
+  text(g, 4, 44, line, fg, bg, 1);
   if (wifiUp) {
     snprintf(line, sizeof(line), "wifi %s", WiFi.localIP().toString().c_str());
-    text(g, 4, 52, line, fg, bg, 1);
+    text(g, 4, 58, line, fg, bg, 1);
     snprintf(line, sizeof(line), "rssi %d dBm", (int)wifiRssi);
-    text(g, 4, 68, line, fg, bg, 1);
+    text(g, 4, 72, line, fg, bg, 1);
   } else {
-    text(g, 4, 52, "wifi down / scanning", dim, bg, 1);
+    text(g, 4, 58, "wifi down / scanning", dim, bg, 1);
   }
   snprintf(line, sizeof(line), "AP %u  BLE %u", (unsigned)nAps, (unsigned)nBle);
   text(g, 4, 90, line, fg, bg, 1);

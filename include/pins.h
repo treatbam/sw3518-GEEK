@@ -14,6 +14,11 @@ static const int PIN_I2C_SCL = 17;
 
 static const int PIN_BOOT_BTN = 0;
 
+// Future side buttons + haptic (free GPIOs on S3-GEEK; wire when case is ready)
+static const int PIN_BTN_LEFT  = 1;   // INPUT_PULLUP momentary
+static const int PIN_BTN_RIGHT = 2;   // INPUT_PULLUP momentary
+static const int PIN_HAPTIC    = 13;  // MOSFET/driver to vibration motor
+
 // TF / microSD (SPI3 / HSPI)
 static const int PIN_SD_CS   = 34;
 static const int PIN_SD_MOSI = 35;

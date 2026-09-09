@@ -74,6 +74,11 @@ Board selection in Arduino IDE (if you prefer): **ESP32S3 Dev Module**, flash 16
 
 ## Controls (single BOOT button)
 
+Top **status bar** (always on): `CHG`/`RAD` mode chip, page crumbs with active underline, and Wi‑Fi/MQTT/web icons. Main also shows a **C/A load-share** bar.
+
+Reserved GPIOs for a future case: `PIN_BTN_LEFT=1`, `PIN_BTN_RIGHT=2`, `PIN_HAPTIC=13`.
+
+
 **Charger mode** (default)
 
 - **Short:** zoom cycle — Main → USB-C → Main → USB-A → Main → Session → Main
