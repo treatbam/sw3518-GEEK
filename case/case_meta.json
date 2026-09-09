@@ -1,26 +1,28 @@
 {
-  "board_mm": [
-    61.0,
-    24.5,
-    7.2
-  ],
-  "outer_mm": [
-    66.55,
-    34.4,
-    10.2
-  ],
-  "notes": [
-    "Based on Waveshare ESP32-S3-GEEK 61.00 x 24.50 mm outline.",
-    "USB-A open end, screen window, BOOT hole, TF slot, I2C wire exit.",
-    "Side button tunnels for GPIO1/GPIO2 tacts; haptic pocket ~10mm coin motor; WS2812 hole in lid.",
-    "DRY-FIT before final print. Tune SCR_*/BTN_*/HAP_* in generate_case.py if needed.",
-    "Print bottom flat, lid outer-face down. PETG preferred near motor heat; PLA OK for prototype.",
-    "0.2mm layer, 3 walls, 15-20% infill. Support rarely needed."
-  ],
-  "pins": {
-    "BTN_LEFT": 1,
-    "BTN_RIGHT": 2,
-    "HAPTIC": 13,
-    "WS2812_suggest": 14
-  }
+  "version": 2,
+  "stock_ref_mm": {
+    "body": [
+      45,
+      24.5,
+      9
+    ],
+    "screen": [
+      25.9,
+      15.86
+    ],
+    "screen_from_far": 9.6
+  },
+  "print_outer_mm": {
+    "body": [
+      48.4,
+      27.9,
+      12.2
+    ],
+    "haptic_d": 10.2
+  },
+  "omitted": [
+    "light_pipes",
+    "button_rods",
+    "button_caps"
+  ]
 }
