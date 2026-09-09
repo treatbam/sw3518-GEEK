@@ -654,7 +654,7 @@ static void drawHistoryPage() {
     snprintf(dur, sizeof(dur), "--");
   }
   ipText(ip, sizeof(ip));
-  gfxText(frame, 4, 14, dur, COL_LIGHTGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 14, dur, COL_WHITE, COL_BLACK, 1);
   // IP always available here (handy for the web UI)
   gfxText(frame, frame.width() - 4, 14, ip, COL_CYAN, COL_BLACK, 1, false, true);
 
@@ -662,15 +662,15 @@ static void drawHistoryPage() {
   const float wh = session.mwh / 1000.0f;
   const float avgW = sessionAvgW();
   snprintf(buf, sizeof(buf), "%.1fW", session.peakW);
-  gfxText(frame, 4, 28, "PEAK", COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 28, "PEAK", COL_LIGHTGREY, COL_BLACK, 1);
   gfxText(frame, 4, 40, buf, COL_WHITE, COL_BLACK, 2);
 
   snprintf(buf, sizeof(buf), "%.1fW", avgW);
-  gfxText(frame, 88, 28, "AVG", COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 88, 28, "AVG", COL_LIGHTGREY, COL_BLACK, 1);
   gfxText(frame, 88, 40, buf, COL_WHITE, COL_BLACK, 2);
 
   snprintf(buf, sizeof(buf), "%.3fWh", wh);
-  gfxText(frame, 168, 28, "ENERGY", COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 168, 28, "ENERGY", COL_LIGHTGREY, COL_BLACK, 1);
   gfxText(frame, 168, 40, buf, COL_WHITE, COL_BLACK, 1);
 
   // W with amps at that same peak-W sample (not independent peak A)
@@ -684,7 +684,7 @@ static void drawHistoryPage() {
 
   snprintf(buf, sizeof(buf), "Vout pk %.2fV", session.peakVoutMv / 1000.0f);
   gfxText(frame, 4, 104, buf, COL_LIGHTGREY, COL_BLACK, 1);
-  gfxText(frame, 4, 118, "long=clear  saved in flash", COL_DARKGREY, COL_BLACK, 1);
+  gfxText(frame, 4, 118, "long=clear  x3=radio", COL_LIGHTGREY, COL_BLACK, 1);
 }
 
 static void drawModeToast() {
