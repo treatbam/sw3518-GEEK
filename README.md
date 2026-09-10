@@ -102,7 +102,7 @@ Optional case wiring: `PIN_BTN_LEFT=1`, `PIN_BTN_RIGHT=2`, `PIN_HAPTIC=13` (hapt
 
 **System page**: Wi-Fi SSID/RSSI bar/channel/IP, MQTT + web server status, heap (free + min) and PSRAM bars, uptime, real loop load (last loop us + loops/s), and AP/BLE scan counts.
 
-**Waterfall** rolls channels 1–13 (~600 ms dwell) with per-channel `WiFi.scanNetworks` (beacon/scan only — no promiscuous sniff). Caption is ASCII-only (Adafruit font).
+**Waterfall** is three stacked channel lanes (each ~1/3 of the panel under the status bar) scrolling up through CH1–13. The lane on the **center line** is the live dwell (color history of that channel’s beacons); the other two visible lanes stay grayscale. Beacon scan only (no promiscuous sniff). ASCII-only TFT strings.
 
 Web: `/` charger · `/radio` AP JSON view · `/help` button map · `/api` metrics
 

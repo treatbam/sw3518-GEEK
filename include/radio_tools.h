@@ -10,7 +10,8 @@ namespace RadioTools {
 static constexpr size_t kMaxAps = 8;
 static constexpr size_t kMaxBle = 8;
 static constexpr size_t kChannels = 14;  // 1..13 used
-static constexpr size_t kHeatCols = 52;
+static constexpr size_t kWfHist = 64;    // per-channel time history
+static constexpr uint8_t kWfLastCh = 13;
 
 enum class Focus : uint8_t { Idle = 0, Wifi = 1, Ble = 2, Waterfall = 3 };
 

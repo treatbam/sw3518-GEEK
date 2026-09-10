@@ -58,14 +58,25 @@ uint32_t nextWifiScan = 0;
 uint32_t nextBleScan = 0;
 static constexpr uint32_t kWifiPeriodMs = 5000;
 static constexpr uint32_t kBlePeriodMs = 4000;
-static constexpr uint32_t kWaterfallDwellMs = 600;
+static constexpr uint32_t kWfMinDwellMs = 700;
+static constexpr uint32_t kWfScrollMs = 28;  // 1 px
+static constexpr uint16_t kWfScanMs = 400;
+static constexpr int kWfTop = 12;
+static constexpr int kWfH = 123;
+static constexpr int kWfBandH = 41;  // 3 lanes under the status bar
 
-uint8_t heat[kHeatCols][kChannels];
-uint8_t heatKind[kHeatCols][kChannels];  // 0 empty, 1 encrypted, 2 open
-size_t heatHead = 0;
+uint8_t wfV[kChannels][kWfHist];
+uint8_t wfK[kChannels][kWfHist];  // 0 empty, 1 enc, 2 open
+uint8_t wfHead[kChannels];
 
-uint8_t rollCh = 1;
 uint8_t dwellCh = 1;
+uint8_t scanCh = 1;
+uint8_t wfCenterCh = 1;
+int wfOffset = 0;  // 0..kWfBandH-1, content moves up
+bool wfFrozen = true;
+bool wfSampled = false;
+uint32_t wfFreezeAt = 0;
+uint32_t wfLastScroll = 0;
 char hotSsid[18] = "";
 int32_t hotRssi = -127;
 uint8_t hotCh = 0;
@@ -94,38 +105,22 @@ bool isOpenAuth(uint8_t auth) {
   return auth == 0;
 }
 
-void pushHeatColumn(const uint16_t score[kChannels], const uint8_t kind[kChannels]) {
-  uint16_t mx = 1;
-  for (uint8_t c = 1; c < kChannels; c++) {
-    if (score[c] > mx) mx = score[c];
-  }
-  for (uint8_t c = 0; c < kChannels; c++) {
-    heat[heatHead][c] = (uint8_t)((score[c] * 255) / mx);
-    heatKind[heatHead][c] = kind[c];
-  }
-  heatHead = (heatHead + 1) % kHeatCols;
+uint8_t wrapCh(int c) {
+  while (c < 1) c += (int)kWfLastCh;
+  while (c > (int)kWfLastCh) c -= (int)kWfLastCh;
+  return (uint8_t)c;
 }
 
-void pushHeatFromAps() {
-  uint16_t score[kChannels] = {};
-  uint8_t kind[kChannels] = {};
-  for (uint8_t i = 0; i < nAps; i++) {
-    const uint8_t ch = aps[i].channel;
-    if (ch == 0 || ch >= kChannels) continue;
-    int s = (int)aps[i].rssi + 90;
-    if (s < 0) s = 0;
-    if (s > 60) s = 60;
-    score[ch] = (uint16_t)(score[ch] + (uint16_t)s + 10);
-    const uint8_t k = isOpenAuth(aps[i].auth) ? 2 : 1;
-    if (k > kind[ch]) kind[ch] = k;
-  }
-  pushHeatColumn(score, kind);
+uint16_t gray565(uint8_t v) {
+  const uint8_t r = v >> 3;
+  const uint8_t g5 = v >> 2;
+  const uint8_t b = v >> 3;
+  return (uint16_t)((r << 11) | (g5 << 5) | b);
 }
 
-// Single-channel dwell: one heat column dominated by rollCh.
-void pushHeatFromChannelScan(uint8_t ch) {
-  uint16_t score[kChannels] = {};
-  uint8_t kind[kChannels] = {};
+void pushWfSample(uint8_t ch) {
+  if (ch == 0 || ch >= kChannels) return;
+  uint8_t v = 0, kind = 0;
   hotSsid[0] = 0;
   hotRssi = -127;
   hotCh = ch;
@@ -134,21 +129,20 @@ void pushHeatFromChannelScan(uint8_t ch) {
     int s = (int)aps[i].rssi + 90;
     if (s < 0) s = 0;
     if (s > 60) s = 60;
-    score[ch] = (uint16_t)(score[ch] + (uint16_t)s + 10);
+    const uint8_t nv = (uint8_t)(s * 255 / 60);
+    if (nv > v) v = nv;
     const uint8_t k = isOpenAuth(aps[i].auth) ? 2 : 1;
-    if (k > kind[ch]) kind[ch] = k;
+    if (k > kind) kind = k;
     if (aps[i].rssi > hotRssi) {
       hotRssi = aps[i].rssi;
       strncpy(hotSsid, aps[i].ssid, sizeof(hotSsid) - 1);
       hotSsid[sizeof(hotSsid) - 1] = 0;
     }
   }
-  // Soft neighbor bleed so empty columns still show channel activity context
-  if (score[ch] > 0) {
-    if (ch > 1) score[ch - 1] = score[ch] / 5;
-    if (ch + 1 < kChannels) score[ch + 1] = score[ch] / 5;
-  }
-  pushHeatColumn(score, kind);
+  const uint8_t h = wfHead[ch];
+  wfV[ch][h] = v;
+  wfK[ch][h] = kind;
+  wfHead[ch] = (uint8_t)((h + 1) % kWfHist);
 }
 
 void ingestWifiScan(bool channelMode) {
@@ -159,10 +153,8 @@ void ingestWifiScan(bool channelMode) {
   if (n <= 0) {
     WiFi.scanDelete();
     if (channelMode) {
-      pushHeatFromChannelScan(dwellCh);
-      rollCh = (dwellCh >= 13) ? 1 : (uint8_t)(dwellCh + 1);
-    } else {
-      pushHeatFromAps();
+      pushWfSample(scanCh);
+      wfSampled = true;
     }
     return;
   }
@@ -193,10 +185,8 @@ void ingestWifiScan(bool channelMode) {
   }
   WiFi.scanDelete();
   if (channelMode) {
-    pushHeatFromChannelScan(dwellCh);
-    rollCh = (dwellCh >= 13) ? 1 : (uint8_t)(dwellCh + 1);
-  } else {
-    pushHeatFromAps();
+    pushWfSample(scanCh);
+    wfSampled = true;
   }
 }
 
@@ -286,13 +276,17 @@ void truncCopy(char* dst, size_t n, const char* src, size_t maxChars) {
 }  // namespace
 
 void begin() {
-  memset(heat, 0, sizeof(heat));
-  memset(heatKind, 0, sizeof(heatKind));
-  heatHead = 0;
+  memset(wfV, 0, sizeof(wfV));
+  memset(wfK, 0, sizeof(wfK));
+  memset(wfHead, 0, sizeof(wfHead));
   nAps = 0;
   nBle = 0;
-  rollCh = 1;
   dwellCh = 1;
+  scanCh = 1;
+  wfCenterCh = 1;
+  wfOffset = 0;
+  wfFrozen = true;
+  wfSampled = false;
   hotSsid[0] = 0;
   hotRssi = -127;
   hotCh = 0;
@@ -302,8 +296,11 @@ void enter() {
   active = true;
   nextWifiScan = 0;
   nextBleScan = 0;
-  rollCh = 1;
-  dwellCh = 1;
+  wfOffset = 0;
+  wfFrozen = true;
+  wfSampled = false;
+  wfFreezeAt = millis();
+  dwellCh = wfCenterCh;
 }
 
 void invalidateBle() {
@@ -335,6 +332,11 @@ void setFocus(Focus f) { focus = f; }
 void requestScan() {
   nextWifiScan = 0;
   nextBleScan = 0;
+  if (focus == Focus::Waterfall) {
+    wfFrozen = true;
+    wfSampled = false;
+    wfFreezeAt = millis();
+  }
 }
 
 void tick(uint32_t now) {
@@ -353,24 +355,42 @@ void tick(uint32_t now) {
       }
     }
   } else if (focus == Focus::Waterfall) {
-    if (wifiScanBusy) {
-      ingestWifiScan(true);
-    } else if (now >= nextWifiScan) {
-      // Per-channel beacon scan (no promiscuous sniff). channel=N when API allows.
-      dwellCh = rollCh;
-      const int16_t r = WiFi.scanNetworks(true, true, false, 300, dwellCh);
-      if (r == WIFI_SCAN_RUNNING || r >= 0) {
-        wifiScanBusy = true;
-        nextWifiScan = now + kWaterfallDwellMs;
-      } else {
-        // Fallback: full scan if channel arg rejected
-        const int16_t r2 = WiFi.scanNetworks(true, true);
-        if (r2 == WIFI_SCAN_RUNNING || r2 >= 0) {
+    if (wifiScanBusy) ingestWifiScan(true);
+
+    const int centerY = kWfTop + kWfH / 2;
+    auto chAtCenter = [&]() -> uint8_t {
+      for (int i = -1; i <= 2; i++) {
+        const int y = kWfTop + (i + 1) * kWfBandH - wfOffset;
+        if (centerY >= y && centerY < y + kWfBandH) return wrapCh((int)wfCenterCh + i);
+      }
+      return wfCenterCh;
+    };
+    dwellCh = chAtCenter();
+
+    if (wfFrozen) {
+      if (!wifiScanBusy && !wfSampled && now >= nextWifiScan) {
+        scanCh = dwellCh;
+        const int16_t r = WiFi.scanNetworks(true, true, false, kWfScanMs, scanCh);
+        if (r == WIFI_SCAN_RUNNING || r >= 0) {
           wifiScanBusy = true;
-          nextWifiScan = now + kWaterfallDwellMs;
         } else {
-          nextWifiScan = now + 1000;
+          const int16_t r2 = WiFi.scanNetworks(true, true);
+          if (r2 == WIFI_SCAN_RUNNING || r2 >= 0) wifiScanBusy = true;
+          else nextWifiScan = now + 400;
         }
+      }
+      if (wfSampled && (now - wfFreezeAt) >= kWfMinDwellMs) wfFrozen = false;
+    } else if (now - wfLastScroll >= kWfScrollMs) {
+      wfLastScroll = now;
+      wfOffset++;
+      if (wfOffset >= kWfBandH) {
+        wfCenterCh = wrapCh((int)wfCenterCh + 1);
+        wfOffset = 0;
+        dwellCh = wfCenterCh;
+        wfFrozen = true;
+        wfSampled = false;
+        wfFreezeAt = now;
+        nextWifiScan = 0;
       }
     }
   } else if (focus == Focus::Ble) {
@@ -419,45 +439,75 @@ void drawApList(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t bar, uint16
   text(g, 4, 124, "short next  long rescan", dim, bg, 1);
 }
 
-void drawWaterfall(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t hot, uint16_t accent,
-                   uint16_t bg) {
-  g.fillScreen(bg);
-  char line[48];
-  text(g, 4, 14, "WATERFALL", accent, bg, 1);
-  snprintf(line, sizeof(line), "dwell CH%u", (unsigned)dwellCh);
-  text(g, 100, 14, line, wifiScanBusy ? accent : fg, bg, 1);
-  text(g, 178, 14, wifiScanBusy ? "hop" : "1-13", dim, bg, 1);
+void drawWfBand(Adafruit_GFX& g, int y, int bandH, uint8_t ch, bool active, uint16_t fg,
+                uint16_t dim, uint16_t hot, uint16_t accent, uint16_t bg) {
+  const int W = g.width();
+  const int H = g.height();
+  if (bandH < 8 || y + bandH <= kWfTop || y >= H) return;
+  int y0 = y;
+  int y1 = y + bandH;
+  if (y0 < kWfTop) y0 = kWfTop;
+  if (y1 > H) y1 = H;
+  const int h = y1 - y0;
+  if (h <= 0) return;
 
-  // Large heat map under status bar: time columns x channel rows
-  const int x0 = 16, y0 = 26, cw = 4, chH = 7;
-  // Highlight current dwell channel row
-  g.fillRect(0, y0 + (int)(dwellCh - 1) * chH, 15, chH - 1, accent);
+  const uint16_t laneBg = active ? bg : (uint16_t)((bg >> 1) & 0x7BEF);
+  g.fillRect(0, y0, W, h, laneBg);
 
-  for (size_t col = 0; col < kHeatCols; col++) {
-    const size_t src = (heatHead + 1 + col) % kHeatCols;
-    for (uint8_t c = 1; c <= 13; c++) {
-      const uint8_t v = heat[src][c];
-      if (v < 6) continue;
-      const uint8_t kind = heatKind[src][c];
-      const uint16_t color = heatColor(v, kind, fg, dim, hot, accent);
-      g.fillRect(x0 + (int)col * cw, y0 + (int)(c - 1) * chH, cw - 1, chH - 1, color);
+  char lab[8];
+  snprintf(lab, sizeof(lab), "CH%u", (unsigned)ch);
+  text(g, 2, y0 + 2, lab, active ? accent : dim, laneBg, 1);
+
+  const int gx = 28;
+  const int gw = W - gx - 2;
+  const int gh = h - 4;
+  const int gy = y0 + 2;
+  if (gw < 8 || gh < 4) return;
+
+  const int colW = gw / (int)kWfHist;
+  const int barW = colW > 1 ? colW - 1 : 1;
+  const uint8_t head = wfHead[ch];
+  for (size_t i = 0; i < kWfHist; i++) {
+    const uint8_t src = (uint8_t)((head + i) % kWfHist);
+    const uint8_t v = wfV[ch][src];
+    if (v < 8) continue;
+    const uint8_t kind = wfK[ch][src];
+    const int bh = 1 + (int)v * (gh - 1) / 255;
+    const int x = gx + (int)i * colW;
+    uint16_t color;
+    if (active) color = heatColor(v, kind, fg, dim, hot, accent);
+    else color = gray565((uint8_t)(v / 3 + 20));
+    g.fillRect(x, gy + gh - bh, barW, bh, color);
+  }
+
+  if (active) {
+    char line[36];
+    if (wifiScanBusy && scanCh == ch) text(g, gx, y0 + 2, "dwell", accent, laneBg, 1);
+    if (hotSsid[0] && hotCh == ch && hotRssi > -120) {
+      snprintf(line, sizeof(line), "%s %d", hotSsid, (int)hotRssi);
+      text(g, gx, y1 - 10, line, fg, laneBg, 1);
     }
   }
-  for (uint8_t c = 1; c <= 13; c++) {
-    char lab[4];
-    snprintf(lab, sizeof(lab), "%u", (unsigned)c);
-    const uint16_t lc = (c == dwellCh) ? 0x0000 : dim;  // black on cyan highlight
-    text(g, 2, y0 + (int)(c - 1) * chH, lab, lc, (c == dwellCh) ? accent : bg, 1);
+}
+
+void drawWaterfall(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t hot, uint16_t accent,
+                   uint16_t bg) {
+  const int W = g.width();
+  const int H = g.height();
+  g.fillRect(0, kWfTop, W, H - kWfTop, bg);
+
+  // Four lanes (prev, dwell, next, peek) shifted up by wfOffset.
+  for (int i = -1; i <= 2; i++) {
+    const int y = kWfTop + (i + 1) * kWfBandH - wfOffset;
+    const uint8_t ch = wrapCh((int)wfCenterCh + i);
+    const bool active = (ch == dwellCh);
+    drawWfBand(g, y, kWfBandH, ch, active, fg, dim, hot, accent, bg);
+    g.drawFastHLine(0, y + kWfBandH - 1, W, dim);
   }
 
-  // Caption: ASCII only - beacon heat / open vs enc + hottest on dwell CH
-  text(g, 4, 118, "beacon heat / open vs enc", dim, bg, 1);
-  if (hotSsid[0] && hotRssi > -120) {
-    snprintf(line, sizeof(line), "CH%u %s %ddBm", (unsigned)hotCh, hotSsid, (int)hotRssi);
-    text(g, 4, 126, line, fg, bg, 1);
-  } else {
-    text(g, 4, 126, "waiting beacons on dwell CH", dim, bg, 1);
-  }
+  const int mid = kWfTop + kWfH / 2;
+  g.drawFastHLine(0, mid, W, accent);
+  g.drawFastHLine(0, mid + 1, W, accent);
 }
 
 void drawBleList(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t bar, uint16_t bg) {
@@ -495,8 +545,8 @@ void drawHelp(Adafruit_GFX& g, uint16_t fg, uint16_t dim, uint16_t accent, uint1
   text(g, 4, 42, "short : next   double : prev", fg, bg, 1);
   text(g, 4, 54, "long  : rescan", fg, bg, 1);
   text(g, 4, 66, "triple: back to charger", fg, bg, 1);
-  text(g, 4, 84, "Wi-Fi = beacon APs + heat", dim, bg, 1);
-  text(g, 4, 96, "Fall = CH roll beacon heat", dim, bg, 1);
+  text(g, 4, 84, "Wi-Fi = beacon APs + RSSI", dim, bg, 1);
+  text(g, 4, 96, "Fall = 3-lane CH dwell", dim, bg, 1);
   text(g, 4, 108, "BLE = nearby advertisers", dim, bg, 1);
   text(g, 4, 122, "web: /radio", accent, bg, 1);
 }
