@@ -1,8 +1,10 @@
 // Isolated BleCombo translation unit (avoids KEY_*/Mouse clashes with USBHID*).
+#include "features.h"
 #include <Arduino.h>
 
-#if __has_include(<BleCombo.h>)
+#if HAS_HID && __has_include(<BleCombo.h>)
 #include <BleCombo.h>
+#include <BLEDevice.h>
 #define HID_BLE 1
 #else
 #define HID_BLE 0
@@ -15,6 +17,13 @@ bool hidBleBegin() {
   return true;
 #else
   return false;
+#endif
+}
+
+void hidBleEnd() {
+#if HID_BLE
+  Keyboard.releaseAll();
+  BLEDevice::deinit(false);
 #endif
 }
 
@@ -52,7 +61,9 @@ void hidBleMouseMove(int8_t x, int8_t y, int8_t wheel) {
 #if HID_BLE
   if (Keyboard.isConnected()) Mouse.move(x, y, wheel);
 #else
-  (void)x; (void)y; (void)wheel;
+  (void)x;
+  (void)y;
+  (void)wheel;
 #endif
 }
 

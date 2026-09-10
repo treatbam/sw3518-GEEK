@@ -10,3 +10,9 @@
 
 # local credentials
 include/secrets.h
+
+# host unit-test binary
+tests/test_session
+
+__pycache__/
+*.pyc

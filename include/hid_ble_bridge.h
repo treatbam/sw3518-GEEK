@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 bool hidBleBegin();
+void hidBleEnd();
 bool hidBleConnected();
 void hidBleWrite(uint8_t k);
 void hidBlePress(uint8_t k);

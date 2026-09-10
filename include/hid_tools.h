@@ -2,28 +2,27 @@
 
 #include <Adafruit_GFX.h>
 #include <stdint.h>
+#include "features.h"
 
 // Keymod-inspired HID mode: USB (+CDC composite) and BLE keyboard/mouse.
 namespace HidTools {
 
 enum class Page : uint8_t { Status = 0, Keys = 1, Mouse = 2, Macros = 3, Help = 4, Count = 5 };
 
-void begin();   // call once from setup (USB HID attaches beside CDC)
-void enter();   // start BLE advertise; leave Radio BLE scan first
-void leave();   // stop BLE advertise
+void begin();
+void enter();
+void leave();
 void tick(uint32_t now);
 
 bool usbReady();
 bool bleConnected();
 bool bleAdvertising();
 
-// Actions — route to both USB (if ready) and BLE (if connected)
-void keyTap(uint8_t keycode, uint8_t modifier = 0);
 void keyChar(char c);
 void mouseMove(int8_t dx, int8_t dy);
-void mouseClick(uint8_t button = 1);  // 1=left 2=right
+void mouseClick(uint8_t button = 1);
 void mouseWheel(int8_t delta);
-void runMacro(uint8_t id);  // 0..n-1
+void runMacro(uint8_t id);
 void actionEnter();
 void actionEsc();
 void actionTab();
