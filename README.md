@@ -60,17 +60,11 @@ Driver lives in `include/sw3518.h` + `src/sw3518.cpp`. Session energy lives in `
 
 ## Build & flash (PlatformIO)
 
-Default env is **charger + radio**, USB **CDC only** (not a keyboard):
+Default env is **charger + radio + HID**. USB stays CDC until you enter HID mode (then keyboard/mouse attach; replug the host if needed):
 
 ```bash
 pio run -e esp32-s3-geek -t upload
 pio device monitor -b 115200
-```
-
-HID (USB + BLE keyboard/mouse) is an explicit second env — the dongle enumerates HID only in this build:
-
-```bash
-pio run -e esp32-s3-geek-hid -t upload
 ```
 
 If upload fails: hold **BOOT**, plug USB-A into the PC, release BOOT (download mode), then upload again. USB CDC is already set in `platformio.ini`.
@@ -87,7 +81,7 @@ Optional case wiring: `PIN_BTN_LEFT=1`, `PIN_BTN_RIGHT=2`, `PIN_HAPTIC=13` (hapt
 
 - **Short:** zoom cycle — Main → USB-C → Main → USB-A → Main → Session → Main
 - **Double:** Session stats (again returns to Main)
-- **Triple:** Radio (or HID on the hid env: Charger → Radio → HID → Charger)
+- **Triple:** cycle Charger → Radio → HID → Charger
 - **Long:** clear session (new connection)
 - **Idle dim:** after 90s, backlight to 50% (any press restores)
 
@@ -95,10 +89,10 @@ Optional case wiring: `PIN_BTN_LEFT=1`, `PIN_BTN_RIGHT=2`, `PIN_HAPTIC=13` (hapt
 
 - **Short:** next page — Wi-Fi APs → Waterfall → BLE → System → Help → …
 - **Double:** previous radio page
-- **Triple:** next app mode (charger, or HID on the hid env)
+- **Triple:** next app mode (Radio → HID → Charger)
 - **Long:** force Wi-Fi rescan
 
-**HID mode** (`esp32-s3-geek-hid` only — KeyMod-inspired USB + BLE keyboard/mouse, not video KVM)
+**HID mode** (KeyMod-inspired USB + BLE keyboard/mouse, not video KVM)
 
 - USB-A enumerates as **CDC + HID** keyboard/mouse (replug host after first entering HID if needed)
 - BLE advertises as a KeyboardMouse combo; **leaving HID stops BLE advertise**
