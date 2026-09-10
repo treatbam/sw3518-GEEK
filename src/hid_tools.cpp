@@ -193,8 +193,12 @@ static void doAction(Action a) {
 }  // namespace
 
 void begin() {
-  // USB HID descriptors attach on enter(), not at boot, so a charger image
-  // enumerates as CDC until HID mode is entered (replug may be required).
+#if HID_HAS_USB
+  usbKb.begin();
+  usbMs.begin();
+  usbStarted = true;
+  Serial.println("HID: USB keyboard+mouse ready (composite with CDC)");
+#endif
 }
 
 void enter() {

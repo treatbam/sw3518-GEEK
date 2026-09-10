@@ -60,7 +60,7 @@ Driver lives in `include/sw3518.h` + `src/sw3518.cpp`. Session energy lives in `
 
 ## Build & flash (PlatformIO)
 
-Default env is **charger + radio + HID**. USB stays CDC until you enter HID mode (then keyboard/mouse attach; replug the host if needed):
+One image: **charger + radio + HID**. USB-A is CDC + keyboard/mouse from boot. Triple-click BOOT cycles the three modes. BLE keyboard advertises in HID mode (Radio BLE scan uses the same radio, so it stops when you leave HID):
 
 ```bash
 pio run -e esp32-s3-geek -t upload
@@ -94,7 +94,7 @@ Optional case wiring: `PIN_BTN_LEFT=1`, `PIN_BTN_RIGHT=2`, `PIN_HAPTIC=13` (hapt
 
 **HID mode** (KeyMod-inspired USB + BLE keyboard/mouse, not video KVM)
 
-- USB-A enumerates as **CDC + HID** keyboard/mouse (replug host after first entering HID if needed)
+- USB-A enumerates as **CDC + HID** keyboard/mouse from boot (replug host after flash if the OS still sees CDC-only)
 - BLE advertises as a KeyboardMouse combo; **leaving HID stops BLE advertise**
 - Pages: Status · Keys · Mouse · Macros · Help
 - **Short:** next page · **Double:** prev (or Esc / right-click on Keys/Mouse) · **Long:** page action (Enter / left-click / run macro)
