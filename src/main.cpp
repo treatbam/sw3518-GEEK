@@ -667,6 +667,25 @@ static void drawConnIcons(Adafruit_GFX& g, int16_t rightX, int16_t y, bool withI
 }
 
 
+// Small chip + slash: SW3518 not on I2C (overlay; pages stay normal)
+static void drawUnlinkedIcon(Adafruit_GFX& g, int x, int y) {
+  g.drawRect(x, y, 10, 8, COL_ORANGE);
+  g.fillRect(x + 1, y + 1, 8, 6, COL_BLACK);
+  g.drawFastVLine(x + 2, y - 1, 2, COL_ORANGE);
+  g.drawFastVLine(x + 5, y - 1, 2, COL_ORANGE);
+  g.drawFastVLine(x + 8, y - 1, 2, COL_ORANGE);
+  g.drawFastVLine(x + 2, y + 7, 2, COL_ORANGE);
+  g.drawFastVLine(x + 5, y + 7, 2, COL_ORANGE);
+  g.drawFastVLine(x + 8, y + 7, 2, COL_ORANGE);
+  g.drawLine(x, y + 7, x + 9, y, COL_ORANGE);
+  g.drawLine(x, y + 8, x + 9, y + 1, COL_ORANGE);
+}
+
+static void clearSnapshot() {
+  snap = SW3518::Snapshot{};
+  lastProtocol = SW3518::Protocol::None;
+}
+
 // Shared top chrome - mode + crumbs + icons (continuity across Charger/Radio)
 static constexpr int kStatusBarH = 12;
 
@@ -716,6 +735,12 @@ static void drawStatusBar(bool withIp) {
     }
   }
 
+  if (!charger.present()) {
+    // Retint mode label + badge just left of wifi/mqtt/web cluster
+    gfxText(frame, 2, 2, (mode == Mode::Radio) ? "RAD" : "CHG", COL_ORANGE, COL_BLACK, 1);
+    const int16_t xWifi = (w - 2) - 12 - 14 - 16;
+    drawUnlinkedIcon(frame, xWifi - 14, 2);
+  }
   drawConnIcons(frame, w - 2, 1, withIp);
 }
 
@@ -737,15 +762,6 @@ static void drawLoadShareBar(int y) {
   char buf[28];
   snprintf(buf, sizeof(buf), "C %.0f%%  A %.0f%%", 100.f * pc / tot, 100.f * pa / tot);
   gfxText(frame, 4, y - 10, buf, COL_LIGHTGREY, COL_BLACK, 1);
-}
-
-static void drawMissing() {
-  frame.fillScreen(COL_BLACK);
-  gfxText(frame, frame.width() / 2, frame.height() / 2 - 12, "SW3518 not found", COL_ORANGE,
-          COL_BLACK, 1, true);
-  gfxText(frame, frame.width() / 2, frame.height() / 2 + 4, "I2C 0x3C SDA16/SCL17", COL_DARKGREY,
-          COL_BLACK, 1, true);
-  tft.push(frame);
 }
 
 static void drawMainChrome() {
@@ -1425,6 +1441,8 @@ void loop() {
     if (charger.probe()) {
       charger.begin(PIN_I2C_SDA, PIN_I2C_SCL, 100000);
       Serial.println("SW3518 appeared");
+    } else {
+      clearSnapshot();
     }
   }
 
@@ -1447,7 +1465,8 @@ void loop() {
       }
       drawFrame(now);
     } else if (!charger.present()) {
-      drawMissing();
+      clearSnapshot();
+      drawFrame(now);
     } else if (charger.readSnapshot(snap)) {
       if (snap.protocol != lastProtocol) {
         lastProtocol = snap.protocol;
@@ -1466,7 +1485,8 @@ void loop() {
         logSd(now);
       }
     } else {
-      drawMissing();
+      clearSnapshot();
+      drawFrame(now);
     }
   }
 
