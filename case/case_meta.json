@@ -1,28 +1,26 @@
 {
   "version": 2,
   "stock_ref_mm": {
-    "body": [
-      45,
-      24.5,
-      9
-    ],
-    "screen": [
-      25.9,
-      15.86
-    ],
+    "body": [45.0, 24.5, 9.0],
+    "screen": [25.9, 15.86],
     "screen_from_far": 9.6
   },
+  "params_mm": {
+    "wall": 1.4,
+    "gap": 0.3,
+    "corner_r": 2.2,
+    "extra_belly": 3.2,
+    "floor": 1.5,
+    "bottom_h": 7.4,
+    "haptic_d": 10.2,
+    "haptic_depth": 2.8,
+    "usb_nose": 12.5,
+    "usb_w": 12.2,
+    "usb_h": 4.6
+  },
   "print_outer_mm": {
-    "body": [
-      48.4,
-      27.9,
-      12.2
-    ],
+    "body": [48.4, 27.9, 12.2],
     "haptic_d": 10.2
   },
-  "omitted": [
-    "light_pipes",
-    "button_rods",
-    "button_caps"
-  ]
+  "omitted": ["light_pipes", "button_rods", "button_caps"]
 }

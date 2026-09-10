@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Adafruit_GFX.h>
+#include "features.h"
 
 // Own-network RF observability (Wi-Fi beacon scan + BLE adverts). No spoofing.
 namespace RadioTools {
@@ -30,6 +31,7 @@ struct BleRow {
 void begin();
 void enter();
 void leave();
+void invalidateBle();  // BLE stack was deinited by HID
 void setFocus(Focus f);
 void tick(uint32_t now);
 void requestScan();

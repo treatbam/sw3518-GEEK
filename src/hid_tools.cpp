@@ -1,8 +1,41 @@
 #include "hid_tools.h"
 #include "hid_ble_bridge.h"
+#include "features.h"
 
 #include <Arduino.h>
 #include <string.h>
+
+#if !HAS_HID
+
+namespace HidTools {
+void begin() {}
+void enter() {}
+void leave() {}
+void tick(uint32_t) {}
+bool usbReady() { return false; }
+bool bleConnected() { return false; }
+bool bleAdvertising() { return false; }
+void keyChar(char) {}
+void mouseMove(int8_t, int8_t) {}
+void mouseClick(uint8_t) {}
+void mouseWheel(int8_t) {}
+void runMacro(uint8_t) {}
+void actionEnter() {}
+void actionEsc() {}
+void actionTab() {}
+void actionArrowLeft() {}
+void actionArrowRight() {}
+const char* pageName(Page) { return "?"; }
+const char* macroName(uint8_t) { return ""; }
+uint8_t macroCount() { return 0; }
+void drawStatus(Adafruit_GFX&, uint16_t, uint16_t, uint16_t, uint16_t) {}
+void drawKeys(Adafruit_GFX&, uint16_t, uint16_t, uint16_t, uint16_t) {}
+void drawMouse(Adafruit_GFX&, uint16_t, uint16_t, uint16_t, uint16_t) {}
+void drawMacros(Adafruit_GFX&, uint16_t, uint16_t, uint16_t, uint16_t) {}
+void drawHelp(Adafruit_GFX&, uint16_t, uint16_t, uint16_t, uint16_t) {}
+}  // namespace HidTools
+
+#else
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
 #include "USB.h"
@@ -160,23 +193,31 @@ static void doAction(Action a) {
 }  // namespace
 
 void begin() {
-#if HID_HAS_USB
-  usbKb.begin();
-  usbMs.begin();
-  usbStarted = true;
-  Serial.println("HID: USB keyboard+mouse ready (composite with CDC)");
-#endif
+  // USB HID descriptors attach on enter(), not at boot, so a charger image
+  // enumerates as CDC until HID mode is entered (replug may be required).
 }
 
 void enter() {
-  if (!bleStarted) {
-    bleStarted = hidBleBegin();
+#if HID_HAS_USB
+  if (!usbStarted) {
+    usbKb.begin();
+    usbMs.begin();
+    usbStarted = true;
+    Serial.println("HID: USB keyboard+mouse ready (composite with CDC)");
   }
+#endif
+  if (!bleStarted) bleStarted = hidBleBegin();
   Serial.println(bleStarted ? "HID: BLE Keyboard+Mouse advertising"
                             : "HID: BLE unavailable — USB only");
 }
 
-void leave() { Serial.println("HID: leave mode (USB HID stays attached)"); }
+void leave() {
+  if (bleStarted) {
+    hidBleEnd();
+    bleStarted = false;
+    Serial.println("HID: BLE stopped");
+  }
+}
 
 void tick(uint32_t) {}
 
@@ -191,8 +232,6 @@ bool usbReady() {
 bool bleConnected() { return bleStarted && hidBleConnected(); }
 
 bool bleAdvertising() { return bleStarted && !hidBleConnected(); }
-
-void keyTap(uint8_t, uint8_t) { doAction(Action::Enter); }
 
 void keyChar(char c) {
 #if HID_HAS_USB
@@ -301,3 +340,5 @@ void actionArrowLeft() { doAction(Action::Left); }
 void actionArrowRight() { doAction(Action::Right); }
 
 }  // namespace HidTools
+
+#endif  // HAS_HID

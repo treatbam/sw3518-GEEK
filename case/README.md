@@ -31,4 +31,4 @@ This print is ~`+3.2` mm taller for the haptic pocket and ~`+1.4` mm walls aroun
 
 PLA for fit check, PETG for daily · 0.2 mm · 3 walls · 15–20% · supports usually off
 
-Tune `GAP` / `EXTRA_BELLY` / `HAP_D` in `generate_case.py` after a dry-fit.
+Tune `params_mm.gap` / `params_mm.extra_belly` / `params_mm.haptic_d` in `case_meta.json` after a dry-fit, then re-run `generate_case.py`. The JSON is the lock; Python reads it.

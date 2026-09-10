@@ -1,5 +1,42 @@
 #include "radio_tools.h"
+#include "features.h"
 #include <string.h>
+
+#if !HAS_RADIO
+
+namespace RadioTools {
+void begin() {}
+void enter() {}
+void leave() {}
+void invalidateBle() {}
+void setFocus(Focus) {}
+void tick(uint32_t) {}
+void requestScan() {}
+uint8_t apCount() { return 0; }
+const ApRow* apAt(uint8_t) { return nullptr; }
+uint8_t bleCount() { return 0; }
+const BleRow* bleAt(uint8_t) { return nullptr; }
+bool scanning() { return false; }
+void drawApList(Adafruit_GFX&, uint16_t, uint16_t, uint16_t, uint16_t) {}
+void drawWaterfall(Adafruit_GFX&, uint16_t, uint16_t, uint16_t, uint16_t, uint16_t) {}
+void drawBleList(Adafruit_GFX&, uint16_t, uint16_t, uint16_t, uint16_t) {}
+void drawHelp(Adafruit_GFX&, uint16_t, uint16_t, uint16_t, uint16_t) {}
+void drawSys(Adafruit_GFX&, uint16_t, uint16_t, uint16_t, uint16_t, bool, int8_t, bool, bool,
+             uint32_t, uint16_t) {}
+size_t jsonStatus(char* out, size_t n) {
+  if (n) out[0] = 0;
+  if (n > 2) {
+    out[0] = '{';
+    out[1] = '}';
+    out[2] = 0;
+    return 2;
+  }
+  return 0;
+}
+}  // namespace RadioTools
+
+#else
+
 #include <BLEDevice.h>
 #include <BLEScan.h>
 #include <BLEAdvertisedDevice.h>
@@ -173,11 +210,7 @@ void ensureBle() {
   bleReady = true;
 }
 
-void runBleScanBlocking() {
-  if (!bleScan) return;
-  bleScanBusy = true;
-  // duration seconds; compatible with Arduino-ESP32 2.x Bluedroid BLE
-  BLEScanResults found = bleScan->start(2, false);
+void ingestBleResults(BLEScanResults found) {
   nBle = 0;
   const int n = found.getCount();
   bool used[32] = {};
@@ -207,8 +240,19 @@ void runBleScanBlocking() {
     strncpy(b.name, name.c_str(), sizeof(b.name) - 1);
     b.name[sizeof(b.name) - 1] = 0;
   }
-  bleScan->clearResults();
+  if (bleScan) bleScan->clearResults();
   bleScanBusy = false;
+}
+
+void onBleScanDone(BLEScanResults found) { ingestBleResults(found); }
+
+void startBleScan() {
+  if (!bleScan || bleScanBusy) return;
+  bleScanBusy = true;
+  // Async: duration in seconds. Must not block the charger UI thread.
+  if (!bleScan->start(2, onBleScanDone, false)) {
+    bleScanBusy = false;
+  }
 }
 
 int rssiBarW(int32_t rssi, int maxW) {
@@ -262,6 +306,12 @@ void enter() {
   dwellCh = 1;
 }
 
+void invalidateBle() {
+  bleScan = nullptr;
+  bleReady = false;
+  bleScanBusy = false;
+}
+
 void leave() {
   active = false;
   focus = Focus::Idle;
@@ -272,6 +322,11 @@ void leave() {
   if (bleScan && bleScanBusy) {
     bleScan->stop();
     bleScanBusy = false;
+  }
+  if (bleReady) {
+    BLEDevice::deinit(false);
+    bleReady = false;
+    bleScan = nullptr;
   }
 }
 
@@ -320,8 +375,9 @@ void tick(uint32_t now) {
     }
   } else if (focus == Focus::Ble) {
     ensureBle();
+    if (bleScanBusy) return;
     if (now >= nextBleScan) {
-      runBleScanBlocking();
+      startBleScan();
       nextBleScan = now + kBlePeriodMs;
     }
   }
@@ -572,3 +628,5 @@ size_t jsonStatus(char* out, size_t n) {
 }
 
 }  // namespace RadioTools
+
+#endif  // HAS_RADIO

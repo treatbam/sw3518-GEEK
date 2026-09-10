@@ -1,6 +1,8 @@
 #pragma once
 #include <Arduino.h>
 #include <Wire.h>
+#include "session.h"
+#include "sw3518_scale.h"
 
 // Minimal SW3518 / SW3518S I2C driver.
 // Registers from iSmartWare RG003 / datasheet. Address 0x3C.
@@ -28,7 +30,8 @@ class SW3518 {
 
   bool begin(int sda, int scl, uint32_t hz = 100000);
   bool present() const { return present_; }
-  bool probe();
+  bool probe();   // updates present_
+  bool rearm();   // enable Vin ADC only — do not Wire.begin() a live bus
 
   bool readVinMv(uint16_t& out);
   bool readVoutMv(uint16_t& out);
@@ -49,6 +52,17 @@ class SW3518 {
     Protocol protocol = Protocol::None;
     uint8_t pd_ver = 0;  // 1=PD2.0, 2=PD3.0
     bool ok = false;
+
+    ChargeSample sample() const {
+      ChargeSample c;
+      c.vout_mv = vout_mv;
+      c.ia_ma = ia_ma;
+      c.ic_ma = ic_ma;
+      c.power_a_w = power_a_w;
+      c.power_c_w = power_c_w;
+      c.power_total_w = power_total_w;
+      return c;
+    }
   };
 
   bool readSnapshot(Snapshot& s);
@@ -56,9 +70,11 @@ class SW3518 {
  private:
   TwoWire& wire_;
   bool present_ = false;
+  bool busStarted_ = false;
 
   bool writeReg(uint8_t reg, uint8_t val);
   bool readReg(uint8_t reg, uint8_t& val);
   bool readAdc(uint8_t type, uint16_t& raw);
   bool enableVinAdc();
+  void startBus(int sda, int scl, uint32_t hz);
 };

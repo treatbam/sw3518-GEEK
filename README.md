@@ -7,10 +7,12 @@ Live USB charger stats on a [Waveshare ESP32-S3-GEEK](https://www.waveshare.com/
 - **Main**: total W, Vin/Vout, C/A amps, active **protocol** (reg `0x06`), session strip (duration / peak W / mWh), dual C/A power sparklines
 - **USB-C / USB-A pages**: big V/A/W, per-port peak A, sparkline
 - Protocol chip **flashes** for 2s when the negotiated protocol changes
-- **Night mode**: backlight dims after 45s idle; any button wakes it
+- **Night mode**: backlight dims to 50% after **90s** idle; any button wakes it
 - Optional **Wi‑Fi → MQTT** for Home Assistant (topics under `geek/sw3518/...`)
 - Optional **TF card** CSV logger (`/sw3518.csv`) while a load is present
 - Serial monitor at `115200`
+
+Session energy, peaks, and sparklines **persist across reboot** in NVS. Long-hold clear wipes them.
 
 ## Wiring (GEEK 4-pin I2C header → SW3518)
 
@@ -54,89 +56,78 @@ The PCB schematic breaks the I2C header out on **GPIO16 / GPIO17**. Some Wavesha
 - Read 12-bit latch: **`0x3B`** (high 8) + **`0x3C`** (low 4) → `raw = (H << 4) | (L & 0x0F)`
 - Protocol status: **`0x06`** `fcx_ind` (QC2/QC3/FCP/SCP/PD FIX/PD PPS/…); bits 5-4 = PD 2.0/3.0 when applicable
 
-Driver lives in `include/sw3518.h` + `src/sw3518.cpp` (minimal ADC path; register notes from iSmartWare datasheet / RG003).
-
-## Blank screen after flash?
-
-Rebuild with latest `main` (needs `CGRAM_OFFSET` + inversion for the 135×240 ST7789). You should see a brief red→green flash on boot. If still black: hold BOOT, reflash, and watch serial at 115200.
+Driver lives in `include/sw3518.h` + `src/sw3518.cpp`. Session energy lives in `include/session.h` (host-tested: `make -C tests test`).
 
 ## Build & flash (PlatformIO)
 
+Default env is **charger + radio**, USB **CDC only** (not a keyboard):
+
 ```bash
-git pull
 pio run -e esp32-s3-geek -t upload
 pio device monitor -b 115200
 ```
 
-Or build only: `pio run -e esp32-s3-geek`. Flash reminder: `git pull && pio run -e esp32-s3-geek -t upload`.
+HID (USB + BLE keyboard/mouse) is an explicit second env — the dongle enumerates HID only in this build:
 
-If upload fails: hold **BOOT**, plug USB-A into the PC, release BOOT (download mode), then upload again. Enable USB CDC is already set in `platformio.ini`.
+```bash
+pio run -e esp32-s3-geek-hid -t upload
+```
+
+If upload fails: hold **BOOT**, plug USB-A into the PC, release BOOT (download mode), then upload again. USB CDC is already set in `platformio.ini`.
 
 Board selection in Arduino IDE (if you prefer): **ESP32S3 Dev Module**, flash 16 MB, PSRAM enabled, **USB CDC On Boot = Enabled**.
 
 ## Controls (single BOOT button)
 
-Top **status bar** (always on): `CHG`/`RAD` mode chip, page crumbs with active underline, and Wi‑Fi/MQTT/web icons. Main also shows a **C/A load-share** bar.
+Top **status bar** (always on): `CHG`/`RAD`/`HID` mode chip, page crumbs with active underline, and Wi‑Fi/MQTT/web icons. Main also shows a **C/A load-share** bar.
 
-Reserved GPIOs for a future case: `PIN_BTN_LEFT=1`, `PIN_BTN_RIGHT=2`, `PIN_HAPTIC=13`.
-
+Optional case wiring: `PIN_BTN_LEFT=1`, `PIN_BTN_RIGHT=2`, `PIN_HAPTIC=13` (haptic pocket in the printed shell; side buttons are HID-only if you wire them).
 
 **Charger mode** (default)
 
 - **Short:** zoom cycle — Main → USB-C → Main → USB-A → Main → Session → Main
 - **Double:** Session stats (again returns to Main)
-- **Triple:** enter **Radio** mode
+- **Triple:** Radio (or HID on the hid env: Charger → Radio → HID → Charger)
 - **Long:** clear session (new connection)
 - **Idle dim:** after 90s, backlight to 50% (any press restores)
 
-**Radio mode** (Wi-Fi tools - beacon scan / channel heat; not an attack suite)
+**Radio mode** (Wi-Fi tools — beacon scan / channel heat; not an attack suite)
 
-- **Short:** next page - Wi-Fi APs -> Waterfall -> BLE -> System -> Help -> ...
+- **Short:** next page — Wi-Fi APs → Waterfall → BLE → System → Help → …
 - **Double:** previous radio page
-- **Triple:** back to **Charger**
+- **Triple:** next app mode (charger, or HID on the hid env)
 - **Long:** force Wi-Fi rescan
 
+**HID mode** (`esp32-s3-geek-hid` only — KeyMod-inspired USB + BLE keyboard/mouse, not video KVM)
 
-**HID mode** (KeyMod-inspired USB + BLE keyboard/mouse — not video KVM)
-
-- **Triple BOOT** cycles **Charger → Radio → HID → Charger**
-- USB-A enumerates as **CDC + HID** keyboard/mouse (replug host after flash if needed)
-- BLE advertises as a KeyboardMouse combo (pair in OS Bluetooth settings)
+- USB-A enumerates as **CDC + HID** keyboard/mouse (replug host after first entering HID if needed)
+- BLE advertises as a KeyboardMouse combo; **leaving HID stops BLE advertise**
 - Pages: Status · Keys · Mouse · Macros · Help
 - **Short:** next page · **Double:** prev (or Esc / right-click on Keys/Mouse) · **Long:** page action (Enter / left-click / run macro)
 - Side buttons (GPIO1/2 if wired): arrows or mouse nudge
 
-**System page** is a compact dashboard under the status bar: Wi-Fi SSID/RSSI bar/channel/IP, MQTT + web server status, heap (free + min) and PSRAM bars, uptime, real loop load (last loop us + loops/s - not fake CPU%), and AP/BLE scan counts. Cyan/yellow/magenta accents match the charger UI.
+**System page**: Wi-Fi SSID/RSSI bar/channel/IP, MQTT + web server status, heap (free + min) and PSRAM bars, uptime, real loop load (last loop us + loops/s), and AP/BLE scan counts.
 
-**Waterfall** rolls channels 1-13 (~600 ms dwell) with per-channel `WiFi.scanNetworks` when the API allows (beacon/scan only - no promiscuous sniff). Heat columns scroll each dwell; color by RSSI intensity (cool dim -> hot magenta/cyan) with open-vs-encrypted tint from scan `encryptionType`. Caption is **ASCII-only** (Adafruit font). Shows dwell CH and hottest AP on that channel.
+**Waterfall** rolls channels 1–13 (~600 ms dwell) with per-channel `WiFi.scanNetworks` (beacon/scan only — no promiscuous sniff). Caption is ASCII-only (Adafruit font).
 
-Web: `/` charger - `/radio` AP JSON view - `/help` button map - `/api` metrics
-
-SSI bar/channel/IP, MQTT + web server status, heap (free + min) and PSRAM bars, uptime, real loop load (last loop us + loops/s - not fake CPU%), and AP/BLE scan counts. Cyan/yellow/magenta accents match the charger UI.
-
-**Waterfall** rolls channels 1-13 (~600 ms dwell) with per-channel `WiFi.scanNetworks` when the API allows (beacon/scan only - no promiscuous sniff). Heat columns scroll each dwell; color by RSSI intensity (cool dim -> hot magenta/cyan) with open-vs-encrypted tint from scan `encryptionType`. Caption is **ASCII-only** (Adafruit font). Shows dwell CH and hottest AP on that channel.
-
-Reserved GPIOs for a future case: `PIN_BTN_LEFT=1`, `PIN_BTN_RIGHT=2`, `PIN_HAPTIC=13` (also noted under Controls).
-
-Web: `/` charger - `/radio` AP JSON view - `/help` button map - `/api` metrics
+Web: `/` charger · `/radio` AP JSON view · `/help` button map · `/api` metrics
 
 USB-C/A pages show a session-length sparkline (grows / rebins to fit) with a time span label.
 
-Session History (energy, peaks, sparklines) **persists across reboot** in flash (NVS). Long-hold clear wipes it.
-While on Session, live SESSION shows for **60s**, then SAVED for **15s**, then repeats (no progress bar). Main/C/A are unchanged.
-
+While on Session, live SESSION shows for **60s**, then SAVED for **15s**, then repeats.
 
 ## Wi‑Fi / MQTT (Home Assistant)
 
 1. `cp include/secrets.h.example include/secrets.h`
-2. Fill `WIFI_*` and `MQTT_*` (broker can be HA’s Mosquitto / Tailscale IP)
-3. Rebuild & flash
+2. Set `WIFI_SSID` (empty string = Wi-Fi off; firmware still builds without `secrets.h`)
+3. Fill `MQTT_*` if you want the broker
+4. Rebuild & flash
 
 Not ESPHome — after Mosquitto is up, the GEEK publishes **Home Assistant MQTT discovery** and should appear as device **SW3518 GEEK** under Settings → Devices & services → MQTT.
 
 State topics (retained) under `MQTT_BASE` (default `geek/sw3518`):
 
-`vin`, `vout`, `i_c`, `i_a`, `power`, `power_c`, `power_a`, `protocol`, `session_mwh`, `session_wh` (Wh for HA Energy), `session_peak_w`, `charging`, `status` (`online`/`offline` LWT)
+`vin`, `vout`, `i_c`, `i_a`, `power`, `power_c`, `power_a`, `protocol`, `session_mwh`, `session_wh` (Wh, **measurement** — this is a resettable session, not an HA Energy-panel total), `session_peak_w`, `charging`, `status` (`online`/`offline` LWT)
 
 Discovery prefix defaults to `homeassistant` (override with `MQTT_DISCOVERY_PREFIX` in `secrets.h`).
 
@@ -152,14 +143,6 @@ Insert a FAT32 card. While charging, appends to `/sw3518.csv`:
 
 No card = silent skip.
 
-## Repo status
-
-Firmware is written for desk verification. After you solder/plug the SW3518, confirm `0x3C` shows up (overview should leave the “not found” screen) and spot-check Vin/Vout/current against a known load.
-
-## License
-
-Firmware in this repo: MIT (unless you later vendor GPL code — keep attributions). SW3518 is a product of Zhuhai iSmartWare; datasheets are theirs.
-
 ## Blank screen / silent serial
 
 1. Hold **BOOT**, plug USB-A, release BOOT, then `pio run -e esp32-s3-geek -t upload`.
@@ -167,8 +150,26 @@ Firmware in this repo: MIT (unless you later vendor GPL code — keep attributio
 3. Monitor: `pio device monitor -b 115200` — you should see `ESP32-S3-GEEK SW3518 stats`.
 4. On boot the backlight should **blink 4 times** even before the LCD init. No blink ⇒ firmware not running / wrong board / flash failed.
 5. This build uses TinyUSB CDC (`ARDUINO_USB_MODE=0`) on the USB-A port (GPIO19/20).
+6. ST7789 path is Adafruit `init(135, 240)` + inversion (not TFT_eSPI). You should see a brief red→green flash on boot.
 
+## Tests
+
+Host (no ESP toolchain):
+
+```bash
+make -C tests test
+```
+
+Covers session energy dt, I2C-lost gap (must not bill the outage), unplug debounce, persist restore, and ADC scaling.
 
 ## Case (3D print)
 
-Parametric STLs for a GEEK shell with button / haptic / WS2812 pockets live in [`case/`](case/). Dry-fit before final print.
+Parametric STLs for a GEEK shell with a haptic pocket live in [`case/`](case/). Dry-fit before final print. Edit `case/case_meta.json` (`gap`, `extra_belly`, `haptic_d`) then `python case/generate_case.py`.
+
+## Repo status
+
+Firmware is written for desk verification. After you solder/plug the SW3518, confirm `0x3C` shows up (overview should leave the “not found” screen) and spot-check Vin/Vout/current against a known load.
+
+## License
+
+Firmware in this repo: MIT (unless you later vendor GPL code — keep attributions). SW3518 is a product of Zhuhai iSmartWare; datasheets are theirs.
