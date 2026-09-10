@@ -312,7 +312,7 @@ static void handleHelp() {
            "<h1>BOOT controls</h1><div class=card><ul>"
            "<li><b>Short</b> - next page (charger zoom / radio pages)</li>"
            "<li><b>Double</b> - Session history (charger) or previous radio page</li>"
-           "<li><b>Triple</b> - cycle Charger / Radio / HID (HID env only)</li>"
+           "<li><b>Triple</b> - cycle Charger / Radio / HID</li>"
            "<li><b>Long</b> - clear session (charger) or rescan (radio)</li>"
            "</ul></div>"
            "<p><a href=/>charger</a> - <a href=/radio>radio</a> - <a href=/api>api</a></p>"
