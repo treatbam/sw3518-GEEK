@@ -15,10 +15,12 @@
 #include "secrets.h"
 #include "geek_display.h"
 #include "radio_tools.h"
+#include "hid_tools.h"
 
 enum class Page : uint8_t { Main = 0, UsbC = 1, UsbA = 2, History = 3 };
-enum class Mode : uint8_t { Charger = 0, Radio = 1 };
+enum class Mode : uint8_t { Charger = 0, Radio = 1, Hid = 2 };
 enum class RadioPage : uint8_t { WifiScan = 0, Waterfall = 1, BleScan = 2, Sys = 3, Help = 4, Count = 5 };
+using HidPage = HidTools::Page;
 
 static constexpr size_t kHistMax = 120;
 static constexpr uint32_t kUiMs = 200;
@@ -63,6 +65,8 @@ int blLevel = kBlFull;
 Page page = Page::Main;
 Mode mode = Mode::Charger;
 RadioPage radioPage = RadioPage::WifiScan;
+HidPage hidPage = HidPage::Status;
+uint8_t hidMacroIdx = 0;
 uint8_t nextFromMain = 0;  // 0=UsbC, 1=UsbA, 2=History
 uint32_t modeToastUntil = 0;
 char modeToast[16] = "";
@@ -492,6 +496,7 @@ static void startZoom(Anim::Kind kind, Page from, Page to) {
 }
 
 static void drawRadioFrame();
+static void drawHidFrame();
 static void drawFrame(uint32_t now);
 
 static void showModeToast(const char* label) {
@@ -501,6 +506,7 @@ static void showModeToast(const char* label) {
 }
 
 static void enterRadioMode() {
+  HidTools::leave();
   mode = Mode::Radio;
   radioPage = RadioPage::WifiScan;
   anim.kind = Anim::Idle;
@@ -517,12 +523,31 @@ static void enterRadioMode() {
 static void enterChargerMode() {
   mode = Mode::Charger;
   RadioTools::leave();
+  HidTools::leave();
   page = Page::Main;
   nextFromMain = 0;
   anim.kind = Anim::Idle;
   showModeToast("CHARGER");
   Serial.println("Mode: CHARGER");
   drawFrame(millis());  // paint charger immediately
+}
+
+static void enterHidMode() {
+  RadioTools::leave();  // stop BLE scan so HID can advertise
+  mode = Mode::Hid;
+  hidPage = HidPage::Status;
+  hidMacroIdx = 0;
+  anim.kind = Anim::Idle;
+  HidTools::enter();
+  showModeToast("HID");
+  Serial.println("Mode: HID");
+  drawHidFrame();
+}
+
+static void cycleAppMode() {
+  if (mode == Mode::Charger) enterRadioMode();
+  else if (mode == Mode::Radio) enterHidMode();
+  else enterChargerMode();
 }
 
 static void onBootClick() {
@@ -532,6 +557,13 @@ static void onBootClick() {
   if (mode == Mode::Radio) {
     radioPage = static_cast<RadioPage>((static_cast<uint8_t>(radioPage) + 1) %
                                        static_cast<uint8_t>(RadioPage::Count));
+    return;
+  }
+
+  if (mode == Mode::Hid) {
+    // Match Radio: short = next page. Long-press = action.
+    hidPage = static_cast<HidPage>((static_cast<uint8_t>(hidPage) + 1) %
+                                   static_cast<uint8_t>(HidPage::Count));
     return;
   }
 
@@ -552,6 +584,21 @@ static void onBootLong() {
     showModeToast("RESCAN");
     return;
   }
+  if (mode == Mode::Hid) {
+    if (hidPage == HidPage::Keys) HidTools::actionEnter();
+    else if (hidPage == HidPage::Mouse) HidTools::mouseClick(1);
+    else if (hidPage == HidPage::Macros) {
+      HidTools::runMacro(hidMacroIdx);
+      const uint8_t ran = hidMacroIdx;
+      hidMacroIdx = (uint8_t)((hidMacroIdx + 1) % HidTools::macroCount());
+      showModeToast(HidTools::macroName(ran));
+    } else if (hidPage == HidPage::Status) {
+      showModeToast(HidTools::bleConnected() ? "BLE OK" : "BLE...");
+    } else {
+      HidTools::actionTab();
+    }
+    return;
+  }
   clearSession();
   page = Page::Main;
   nextFromMain = 0;
@@ -566,6 +613,21 @@ static void onBootDouble() {
     uint8_t i = static_cast<uint8_t>(radioPage);
     i = (i == 0) ? (static_cast<uint8_t>(RadioPage::Count) - 1) : (i - 1);
     radioPage = static_cast<RadioPage>(i);
+    return;
+  }
+
+  if (mode == Mode::Hid) {
+    if (hidPage == HidPage::Keys) {
+      HidTools::actionEsc();
+      return;
+    }
+    if (hidPage == HidPage::Mouse) {
+      HidTools::mouseClick(2);
+      return;
+    }
+    uint8_t i = static_cast<uint8_t>(hidPage);
+    i = (i == 0) ? (static_cast<uint8_t>(HidPage::Count) - 1) : (i - 1);
+    hidPage = static_cast<HidPage>(i);
     return;
   }
 
@@ -585,8 +647,7 @@ static void onBootMulti() {
   touchActivity();
   const int n = bootBtn.getNumberClicks();
   if (n < 3) return;
-  if (mode == Mode::Charger) enterRadioMode();
-  else enterChargerMode();
+  cycleAppMode();
 }
 
 static void finishAnim(uint32_t now) {
@@ -695,12 +756,15 @@ static void drawStatusBar(bool withIp) {
   frame.drawFastHLine(0, kStatusBarH - 1, w, COL_DIM);
 
   const bool radio = (mode == Mode::Radio);
-  gfxText(frame, 2, 2, radio ? "RAD" : "CHG", radio ? COL_MAGENTA : COL_CYAN, COL_BLACK, 1);
+  const char* modeTag = radio ? "RAD" : (mode == Mode::Hid ? "HID" : "CHG");
+  const uint16_t modeCol = radio ? COL_MAGENTA : (mode == Mode::Hid ? COL_YELLOW : COL_CYAN);
+  gfxText(frame, 2, 2, modeTag, modeCol, COL_BLACK, 1);
 
   // Crumbs
   const char* crumbs[5];
   int n = 0;
   int active = 0;
+  const bool hid = (mode == Mode::Hid);
   if (radio) {
     crumbs[n++] = "WIFI";
     crumbs[n++] = "FALL";
@@ -708,6 +772,15 @@ static void drawStatusBar(bool withIp) {
     crumbs[n++] = "SYS";
     crumbs[n++] = "HELP";
     active = (int)radioPage;
+    if (active < 0) active = 0;
+    if (active >= n) active = n - 1;
+  } else if (hid) {
+    crumbs[n++] = "STAT";
+    crumbs[n++] = "KEYS";
+    crumbs[n++] = "MSE";
+    crumbs[n++] = "MAC";
+    crumbs[n++] = "HELP";
+    active = (int)hidPage;
     if (active < 0) active = 0;
     if (active >= n) active = n - 1;
   } else {
@@ -728,7 +801,7 @@ static void drawStatusBar(bool withIp) {
     const uint16_t col = on ? COL_WHITE : COL_DARKGREY;
     gfxText(frame, x, 2, crumbs[i], col, COL_BLACK, 1);
     const int tw = (int)strlen(crumbs[i]) * 6;
-    if (on) frame.drawFastHLine(x, 10, tw, radio ? COL_MAGENTA : COL_CYAN);
+    if (on) frame.drawFastHLine(x, 10, tw, radio ? COL_MAGENTA : (mode == Mode::Hid ? COL_YELLOW : COL_CYAN));
     x += tw + 6;
     if (i + 1 < n) {
       gfxText(frame, x - 5, 2, ".", COL_DIM, COL_BLACK, 1);
@@ -737,7 +810,7 @@ static void drawStatusBar(bool withIp) {
 
   if (!charger.present()) {
     // Retint mode label + badge just left of wifi/mqtt/web cluster
-    gfxText(frame, 2, 2, (mode == Mode::Radio) ? "RAD" : "CHG", COL_ORANGE, COL_BLACK, 1);
+    gfxText(frame, 2, 2, modeTag, COL_ORANGE, COL_BLACK, 1);
     const int16_t xWifi = (w - 2) - 12 - 14 - 16;
     drawUnlinkedIcon(frame, xWifi - 14, 2);
   }
@@ -901,6 +974,31 @@ static void drawModeToast() {
   gfxText(frame, frame.width() / 2, 56, modeToast, COL_BLACK, COL_CYAN, 2, true);
 }
 
+
+static void drawHidFrame() {
+  frame.fillScreen(COL_BLACK);
+  switch (hidPage) {
+    case HidPage::Status:
+      HidTools::drawStatus(frame, COL_WHITE, COL_LIGHTGREY, COL_YELLOW, COL_BLACK);
+      break;
+    case HidPage::Keys:
+      HidTools::drawKeys(frame, COL_WHITE, COL_LIGHTGREY, COL_YELLOW, COL_BLACK);
+      break;
+    case HidPage::Mouse:
+      HidTools::drawMouse(frame, COL_WHITE, COL_LIGHTGREY, COL_YELLOW, COL_BLACK);
+      break;
+    case HidPage::Macros:
+      HidTools::drawMacros(frame, COL_WHITE, COL_LIGHTGREY, COL_YELLOW, COL_BLACK);
+      break;
+    default:
+      HidTools::drawHelp(frame, COL_WHITE, COL_LIGHTGREY, COL_YELLOW, COL_BLACK);
+      break;
+  }
+  drawStatusBar(false);
+  drawModeToast();
+  tft.push(frame);
+}
+
 static void drawRadioFrame() {
   const bool wifiUp = wifiEnabled && WiFi.status() == WL_CONNECTED;
   const int8_t rssi = wifiUp ? (int8_t)WiFi.RSSI() : (int8_t)-127;
@@ -944,9 +1042,13 @@ static void drawRadioFrame() {
 }
 
 static void drawFrame(uint32_t now) {
-  // Radio is a separate app shell - never fall through into charger chrome
+  // Radio / HID are separate app shells - never fall through into charger chrome
   if (mode == Mode::Radio) {
     drawRadioFrame();
+    return;
+  }
+  if (mode == Mode::Hid) {
+    drawHidFrame();
     return;
   }
 
@@ -1378,7 +1480,10 @@ void setup() {
   delay(200);
   tft.fillScreen(COL_BLACK);
 
+  pinMode(PIN_BTN_LEFT, INPUT_PULLUP);
+  pinMode(PIN_BTN_RIGHT, INPUT_PULLUP);
   RadioTools::begin();
+  HidTools::begin();
   bootBtn.attachClick(onBootClick);
   bootBtn.attachDoubleClick(onBootDouble);
   bootBtn.attachMultiClick(onBootMulti);
@@ -1400,11 +1505,53 @@ void setup() {
   loadSessionPersist();
 }
 
+
+static void serviceSideButtons() {
+  static bool prevL = true, prevR = true;
+  static uint32_t lastL = 0, lastR = 0;
+  const uint32_t now = millis();
+  const bool l = digitalRead(PIN_BTN_LEFT);
+  const bool r = digitalRead(PIN_BTN_RIGHT);
+  if (l != prevL) {
+    prevL = l;
+    if (!l && now - lastL > 40) {
+      lastL = now;
+      touchActivity();
+      if (mode == Mode::Hid) {
+        if (hidPage == HidPage::Mouse) HidTools::mouseMove(-12, 0);
+        else if (hidPage == HidPage::Keys) HidTools::actionArrowLeft();
+        else {
+          uint8_t i = static_cast<uint8_t>(hidPage);
+          i = (i == 0) ? (static_cast<uint8_t>(HidPage::Count) - 1) : (i - 1);
+          hidPage = static_cast<HidPage>(i);
+        }
+      }
+    }
+  }
+  if (r != prevR) {
+    prevR = r;
+    if (!r && now - lastR > 40) {
+      lastR = now;
+      touchActivity();
+      if (mode == Mode::Hid) {
+        if (hidPage == HidPage::Mouse) HidTools::mouseMove(12, 0);
+        else if (hidPage == HidPage::Keys) HidTools::actionArrowRight();
+        else {
+          hidPage = static_cast<HidPage>((static_cast<uint8_t>(hidPage) + 1) %
+                                         static_cast<uint8_t>(HidPage::Count));
+        }
+      }
+    }
+  }
+}
+
 void loop() {
   const uint32_t loopT0 = micros();
   bootBtn.tick();
+  serviceSideButtons();
   const uint32_t now = millis();
   RadioTools::tick(now);
+  HidTools::tick(now);
   tickHistFace(now);
   saveSessionPersist(false);
 
@@ -1449,7 +1596,15 @@ void loop() {
   const uint32_t uiPeriod = anim.busy() ? 33 : kUiMs;  // ~30fps while zooming
   if (now - lastUiMs >= uiPeriod) {
     lastUiMs = now;
-    if (mode == Mode::Radio) {
+    if (mode == Mode::Hid) {
+      if (charger.present() && charger.readSnapshot(snap)) {
+        pushHistory();
+        updateSession(now);
+      } else if (!charger.present()) {
+        clearSnapshot();
+      }
+      drawFrame(now);
+    } else if (mode == Mode::Radio) {
       // Keep session stats warm if charger is up, but UI is radio
       if (charger.present() && charger.readSnapshot(snap)) {
         pushHistory();

@@ -96,6 +96,16 @@ Reserved GPIOs for a future case: `PIN_BTN_LEFT=1`, `PIN_BTN_RIGHT=2`, `PIN_HAPT
 - **Triple:** back to **Charger**
 - **Long:** force Wi-Fi rescan
 
+
+**HID mode** (KeyMod-inspired USB + BLE keyboard/mouse — not video KVM)
+
+- **Triple BOOT** cycles **Charger → Radio → HID → Charger**
+- USB-A enumerates as **CDC + HID** keyboard/mouse (replug host after flash if needed)
+- BLE advertises as a KeyboardMouse combo (pair in OS Bluetooth settings)
+- Pages: Status · Keys · Mouse · Macros · Help
+- **Short:** next page · **Double:** prev (or Esc / right-click on Keys/Mouse) · **Long:** page action (Enter / left-click / run macro)
+- Side buttons (GPIO1/2 if wired): arrows or mouse nudge
+
 **System page** is a compact dashboard under the status bar: Wi-Fi SSID/RSSI bar/channel/IP, MQTT + web server status, heap (free + min) and PSRAM bars, uptime, real loop load (last loop us + loops/s - not fake CPU%), and AP/BLE scan counts. Cyan/yellow/magenta accents match the charger UI.
 
 **Waterfall** rolls channels 1-13 (~600 ms dwell) with per-channel `WiFi.scanNetworks` when the API allows (beacon/scan only - no promiscuous sniff). Heat columns scroll each dwell; color by RSSI intensity (cool dim -> hot magenta/cyan) with open-vs-encrypted tint from scan `encryptionType`. Caption is **ASCII-only** (Adafruit font). Shows dwell CH and hottest AP on that channel.
