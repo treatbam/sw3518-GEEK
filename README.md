@@ -146,6 +146,60 @@ No card = silent skip.
 5. This build uses TinyUSB CDC (`ARDUINO_USB_MODE=0`) on the USB-A port (GPIO19/20).
 6. ST7789 path is Adafruit `init(135, 240)` + inversion (not TFT_eSPI). You should see a brief red→green flash on boot.
 
+
+## MSC stick build (`esp32-s3-geek-msc-stick`)
+
+Separate PlatformIO environment — **not** the default charger+radio+HID image. Boots a **USB CDC + MSC** gadget that exposes the onboard TF/SD card to the host, with a MoveSpeed-inspired dashboard (MCU temp gauge, honest R/W MB/s + sparkline, capacity %, Full-Speed link badge).
+
+**Why separate?** USB HID + MSC composite is fragile on this TinyUSB/Arduino-ESP32 stack. This env **omits HID / BleCombo** entirely. Dual-mode is **Stick ↔ Wi‑Fi** (radio_tools) — Wi‑Fi does not conflict with MSC the way HID does. Charger/SW3518 is not used at runtime in this env.
+
+### Build & flash
+
+```bash
+pio run -e esp32-s3-geek-msc-stick -t upload
+pio device monitor -b 115200 -e esp32-s3-geek-msc-stick
+```
+
+Default charger firmware is unchanged:
+
+```bash
+pio run -e esp32-s3-geek -t upload
+```
+
+### Requirements
+
+- **FAT** (FAT16/FAT32) TF/microSD in the GEEK slot (SPI: CS=34 MOSI=35 SCK=36 MISO=37)
+- Host USB-A cable into the GEEK (native USB Full Speed)
+- After flash, **unplug/replug** so the host re-enumerates CDC+MSC
+
+### Speeds (honest)
+
+ESP32-S3 onboard USB is **Full Speed (~12 Mbps)**. The UI badge shows **`12Mbps`**. Measured R/W MB/s come from MSC byte counters — expect roughly **~1 MB/s class** in practice (SPI SD + FS USB), **never** fake ~1000 MB/s or 10 Gbps.
+
+### Controls (this env)
+
+| Input | Stick (MSC dash) | Wi‑Fi (Radio) |
+|-------|------------------|---------------|
+| **Short BOOT** | wake / no page cycle | next radio page |
+| **Double** | — | prev radio page |
+| **Triple** | → Wi‑Fi mode | → Stick mode |
+| **Long** | toast `SD OK` / `NO SD` | force Wi‑Fi rescan |
+
+Status bar mode chip: **`MSC`** (orange) or **`RAD`** (magenta). Stick crumb: `DASH`.
+
+### SD missing
+
+Dashboard shows **NO SD CARD** (no crash). MSC reports media not present until a card is inserted and you reboot/replug.
+
+### USB composite notes
+
+- Composite: **CDC (Serial) + MSC** only (`ARDUINO_USB_MODE=0` TinyUSB)
+- `USBMSC` object is constructed at static init so the MSC interface is registered **before** `USB.begin()` (CDC-on-boot)
+- Do not enable HID in this env — keep charger HID on `esp32-s3-geek` / `esp32-s3-geek-hid`
+- Host and on-device FatFS should not thrash the card at once; capacity % refreshes while MSC is idle
+
+Modules: `include/msc_stick.h`, `src/msc_stick.cpp`. Flag: `-DHAS_MSC_STICK=1` / `-DGEEK_USB_GADGET=1`.
+
 ## Tests
 
 Host (no ESP toolchain):

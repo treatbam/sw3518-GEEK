@@ -8,7 +8,7 @@
 #include "sw3518.h"
 
 enum class Page : uint8_t { Main = 0, UsbC = 1, UsbA = 2, History = 3 };
-enum class Mode : uint8_t { Charger = 0, Radio = 1, Hid = 2 };
+enum class Mode : uint8_t { Charger = 0, Radio = 1, Hid = 2, Stick = 3 };
 enum class RadioPage : uint8_t {
   WifiScan = 0,
   Waterfall = 1,
@@ -56,7 +56,11 @@ struct App {
   Session saved;
   bool savedOk = false;
 
+#if HAS_MSC_STICK
+  Mode mode = Mode::Stick;
+#else
   Mode mode = Mode::Charger;
+#endif
   Page page = Page::Main;
   RadioPage radioPage = RadioPage::WifiScan;
   HidTools::Page hidPage = HidTools::Page::Status;
