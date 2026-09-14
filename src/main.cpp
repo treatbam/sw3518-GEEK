@@ -13,6 +13,7 @@
 #include "radio_tools.h"
 #include "session_store.h"
 #include "ui.h"
+#include "msc_stick.h"
 
 static OneButton bootBtn(PIN_BOOT_BTN, true, true);
 static SPIClass* sdSpi = nullptr;
@@ -107,7 +108,27 @@ static void enterHidMode() {
 }
 #endif
 
+#if HAS_MSC_STICK
+static void enterStickMode() {
+  RadioTools::leave();
+  RadioTools::invalidateBle();
+  app.mode = Mode::Stick;
+  app.anim.kind = Anim::Idle;
+  uiShowModeToast("STICK");
+  Serial.println("Mode: STICK");
+  hapticPulse();
+  uiDraw(millis());
+}
+#endif
+
 static void cycleAppMode() {
+#if HAS_MSC_STICK
+  if (app.mode == Mode::Stick) {
+    enterRadioMode();
+  } else {
+    enterStickMode();
+  }
+#else
   if (app.mode == Mode::Charger) {
 #if HAS_RADIO
     enterRadioMode();
@@ -123,6 +144,7 @@ static void cycleAppMode() {
   } else {
     enterChargerMode();
   }
+#endif
 }
 
 static void onBootClick() {
@@ -141,6 +163,13 @@ static void onBootClick() {
                                               static_cast<uint8_t>(HidTools::Page::Count));
     return;
   }
+
+#if HAS_MSC_STICK
+  if (app.mode == Mode::Stick) {
+    // Single dashboard page; short press wakes / acknowledges only.
+    return;
+  }
+#endif
 
   if (app.page == Page::Main) {
     Page dest = Page::UsbC;
@@ -175,6 +204,12 @@ static void onBootLong() {
     }
     return;
   }
+#if HAS_MSC_STICK
+  if (app.mode == Mode::Stick) {
+    uiShowModeToast(MscStick::sdOk() ? "SD OK" : "NO SD");
+    return;
+  }
+#endif
   clearSession();
   app.page = Page::Main;
   app.nextFromMain = 0;
@@ -192,6 +227,10 @@ static void onBootDouble() {
     syncRadioFocus();
     return;
   }
+
+#if HAS_MSC_STICK
+  if (app.mode == Mode::Stick) return;
+#endif
 
   if (app.mode == Mode::Hid) {
     if (app.hidPage == HidTools::Page::Keys) {
@@ -343,7 +382,11 @@ void setup() {
   while (!Serial && millis() < serialDeadline) delay(10);
 
   logLine("");
+#if HAS_MSC_STICK
+  logLine("ESP32-S3-GEEK MSC stick boot");
+#else
   logLine("ESP32-S3-GEEK SW3518 stats");
+#endif
 
   Serial.println("Adafruit ST7789 init...");
   Serial.flush();
@@ -360,7 +403,9 @@ void setup() {
   pinMode(PIN_BTN_LEFT, INPUT_PULLUP);
   pinMode(PIN_BTN_RIGHT, INPUT_PULLUP);
   RadioTools::begin();
+#if !HAS_MSC_STICK
   HidTools::begin();
+#endif
   bootBtn.attachClick(onBootClick);
   bootBtn.attachDoubleClick(onBootDouble);
   bootBtn.attachMultiClick(onBootMulti);
@@ -370,6 +415,12 @@ void setup() {
   app.lastActivityMs = millis();
   app.ipShowUntilMs = millis() + 90000;
 
+#if HAS_MSC_STICK
+  netSetup();
+  MscStick::begin();
+  app.mode = Mode::Stick;
+  app.sdOk = MscStick::sdOk();
+#else
   netSetup();
   setupSd();
 
@@ -380,6 +431,7 @@ void setup() {
   }
 
   sessionStoreLoad();
+#endif
   hapticPulse(30, 180);
 }
 
@@ -390,9 +442,13 @@ void loop() {
   hapticService();
   const uint32_t now = millis();
   RadioTools::tick(now);
+#if HAS_MSC_STICK
+  MscStick::tick(now);
+#else
   HidTools::tick(now);
   uiTickHistFace(now);
   sessionStoreTick(now, false);
+#endif
   netTick();
 
   if (now - app.lastBeatMs >= 2000) {
@@ -411,10 +467,14 @@ void loop() {
   const uint32_t uiPeriod = app.anim.busy() ? 33 : kUiMs;
   if (now - app.lastUiMs >= uiPeriod) {
     app.lastUiMs = now;
+#if HAS_MSC_STICK
+    app.sdOk = MscStick::sdOk();
+#else
     chargerTick(now);
     if (app.session.dirty && app.session.phase == Phase::Paused) {
       sessionStoreTick(now, true);
     }
+#endif
     uiDraw(now);
   }
 

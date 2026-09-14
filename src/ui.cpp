@@ -2,6 +2,7 @@
 #include "net.h"
 #include "radio_tools.h"
 #include "hid_tools.h"
+#include "msc_stick.h"
 #include "pins.h"
 #include "session.h"
 
@@ -157,8 +158,10 @@ static void drawStatusBar(bool withIp) {
 
   const bool radio = (app.mode == Mode::Radio);
   const bool hid = (app.mode == Mode::Hid);
-  const char* modeTag = radio ? "RAD" : (hid ? "HID" : "CHG");
-  const uint16_t modeCol = radio ? COL_MAGENTA : (hid ? COL_YELLOW : COL_CYAN);
+  const bool stick = (app.mode == Mode::Stick);
+  const char* modeTag = radio ? "RAD" : (hid ? "HID" : (stick ? "MSC" : "CHG"));
+  const uint16_t modeCol =
+      radio ? COL_MAGENTA : (hid ? COL_YELLOW : (stick ? COL_ORANGE : COL_CYAN));
   gfxText(frame, 2, 2, modeTag, modeCol, COL_BLACK, 1);
 
   const char* crumbs[5];
@@ -178,6 +181,9 @@ static void drawStatusBar(bool withIp) {
     crumbs[n++] = "MAC";
     crumbs[n++] = "HELP";
     active = (int)app.hidPage;
+  } else if (stick) {
+    crumbs[n++] = "DASH";
+    active = 0;
   } else {
     crumbs[n++] = "MAIN";
     crumbs[n++] = "C";
@@ -199,13 +205,14 @@ static void drawStatusBar(bool withIp) {
     gfxText(frame, x, 2, crumbs[i], on ? COL_WHITE : COL_DARKGREY, COL_BLACK, 1);
     const int tw = (int)strlen(crumbs[i]) * 6;
     if (on) {
-      frame.drawFastHLine(x, 10, tw, radio ? COL_MAGENTA : (hid ? COL_YELLOW : COL_CYAN));
+      frame.drawFastHLine(x, 10, tw,
+                          radio ? COL_MAGENTA : (hid ? COL_YELLOW : (stick ? COL_ORANGE : COL_CYAN)));
     }
     x += tw + 6;
     if (i + 1 < n) gfxText(frame, x - 5, 2, ".", COL_DIM, COL_BLACK, 1);
   }
 
-  if (!app.charger.present()) {
+  if (!stick && !app.charger.present()) {
     gfxText(frame, 2, 2, modeTag, COL_ORANGE, COL_BLACK, 1);
     const int16_t xWifi = (w - 2) - 12 - 14 - 16;
     drawUnlinkedIcon(frame, xWifi - 14, 2);
@@ -416,7 +423,21 @@ static void drawRadioFrame() {
   uiPush();
 }
 
+static void drawStickFrame() {
+  app.frame.fillScreen(COL_BLACK);
+#if HAS_MSC_STICK
+  MscStick::drawDashboard(app.frame, COL_WHITE, COL_LIGHTGREY, COL_CYAN, COL_ORANGE, COL_BLACK);
+#endif
+  drawStatusBar(false);
+  drawModeToast();
+  uiPush();
+}
+
 void uiDraw(uint32_t now) {
+  if (app.mode == Mode::Stick) {
+    drawStickFrame();
+    return;
+  }
   if (app.mode == Mode::Radio) {
     drawRadioFrame();
     return;
