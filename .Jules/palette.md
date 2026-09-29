@@ -1,0 +1,3 @@
+## 2026-09-29 - Missing `lang` attribute and poor contrast in web UI
+**Learning:** Hardcoded HTML in C++ files (like the web UI in this project) often misses basic a11y standards like `lang="en"`, causing screen readers to use default pronunciation. Additionally, subtle helper text (e.g. `#666` on `#111` background) often fails contrast checks (3.0:1) and needs to be lightened (e.g. `#aaa` for 7.3:1).
+**Action:** When working on embedded or hardcoded HTML strings, always check for the `lang` attribute in the `<html>` tag and verify contrast ratios for helper/secondary text.
