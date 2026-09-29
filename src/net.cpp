@@ -235,7 +235,7 @@ static void handleRoot() {
   char page[1200];
   const bool charging = app.snap.ia_ma > Session::kLoadMa || app.snap.ic_ma > Session::kLoadMa;
   snprintf(page, sizeof(page),
-           "<!doctype html><html><head><meta charset=utf-8>"
+           "<!doctype html><html lang=\"en\"><head><meta charset=utf-8>"
            "<meta http-equiv=refresh content=2>"
            "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
            "<title>SW3518 GEEK</title>"
@@ -251,7 +251,7 @@ static void handleRoot() {
            "session %.0f mWh (%.3f Wh) &nbsp; peak %.1f W</div>"
            "<div class=\"card g\">MQTT %s &nbsp; Wi-Fi %s (%d dBm)</div>"
            "<p><a href=/radio style=color:#0ff>radio</a> - <a href=/help style=color:#0ff>help</a></p>"
-           "<p style=color:#666>Auto-refresh 2s - icon on device lights while you are here.</p>"
+           "<p style=color:#aaa>Auto-refresh 2s - icon on device lights while you are here.</p>"
            "</body></html>",
            app.snap.power_total_w, charging ? "CHARGING" : "IDLE", app.snap.vin_mv / 1000.0f,
            app.snap.vout_mv / 1000.0f, app.snap.ic_ma / 1000.0f, app.snap.power_c_w,
@@ -283,7 +283,7 @@ static void handleRadio() {
   RadioTools::jsonStatus(apJson, sizeof(apJson));
   const char* modeName = (app.mode == Mode::Radio) ? "radio" : "charger";
   snprintf(body, sizeof(body),
-           "<!doctype html><html><head><meta charset=utf-8>"
+           "<!doctype html><html lang=\"en\"><head><meta charset=utf-8>"
            "<meta http-equiv=refresh content=3>"
            "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
            "<title>GEEK Radio</title>"
@@ -294,7 +294,7 @@ static void handleRadio() {
            "<h1>Radio</h1><p>Device mode: <b>%s</b> - "
            "<a href=/>charger</a> - <a href=/help>help</a></p>"
            "<div class=card><pre>%s</pre></div>"
-           "<p style=color:#666>AP list from Wi-Fi beacon scan (own RF view).</p>"
+           "<p style=color:#aaa>AP list from Wi-Fi beacon scan (own RF view).</p>"
            "</body></html>",
            modeName, apJson);
   web.send(200, "text/html", body);
@@ -303,7 +303,7 @@ static void handleRadio() {
 static void handleHelp() {
   netNoteWebHit();
   web.send(200, "text/html",
-           "<!doctype html><html><head><meta charset=utf-8>"
+           "<!doctype html><html lang=\"en\"><head><meta charset=utf-8>"
            "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
            "<title>GEEK Help</title>"
            "<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:1.2rem}"
