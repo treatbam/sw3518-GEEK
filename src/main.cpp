@@ -59,6 +59,12 @@ static void onBootClick() {
     syncRadioFocus();
     return;
   }
+#if HAS_TOTP
+  if (app.mode == Mode::Totp) {
+    TotpTools::nextAccount();
+    return;
+  }
+#endif
 }
 
 static void onBootLong() {
@@ -79,12 +85,50 @@ static void onBootDouble() {
     syncRadioFocus();
     return;
   }
+#if HAS_TOTP
+  if (app.mode == Mode::Totp) {
+    TotpTools::typeCurrentCode();
+    return;
+  }
+#endif
 }
 
 static void onBootMulti() {
   uiTouchActivity();
   if (bootBtn.getNumberClicks() < 3) return;
   cycleAppMode();
+}
+
+static void serviceSideButtons() {
+  static bool prevL = true, prevR = true;
+  static uint32_t lastL = 0, lastR = 0;
+  const uint32_t now = millis();
+  const bool l = digitalRead(PIN_BTN_LEFT);
+  const bool r = digitalRead(PIN_BTN_RIGHT);
+  if (l != prevL) {
+    prevL = l;
+    if (!l && now - lastL > 40) {
+      lastL = now;
+      uiTouchActivity();
+#if HAS_TOTP
+      if (app.mode == Mode::Totp) {
+        TotpTools::prevAccount();
+      }
+#endif
+    }
+  }
+  if (r != prevR) {
+    prevR = r;
+    if (!r && now - lastR > 40) {
+      lastR = now;
+      uiTouchActivity();
+#if HAS_TOTP
+      if (app.mode == Mode::Totp) {
+        TotpTools::nextAccount();
+      }
+#endif
+    }
+  }
 }
 
 void setup() {
@@ -140,6 +184,7 @@ void setup() {
 void loop() {
   const uint32_t loopT0 = micros();
   bootBtn.tick();
+  serviceSideButtons();
   hapticService();
   const uint32_t now = millis();
   RadioTools::tick(now);
