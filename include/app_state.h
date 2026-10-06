@@ -1,22 +1,11 @@
 #pragma once
-
 #include <Arduino.h>
 #include "features.h"
 #include "geek_display.h"
-#include "hid_tools.h"
-#include "session.h"
-#include "sw3518.h"
 
 enum class Page : uint8_t { Main = 0, UsbC = 1, UsbA = 2, History = 3 };
-enum class Mode : uint8_t { Charger = 0, Radio = 1, Hid = 2, Stick = 3 };
-enum class RadioPage : uint8_t {
-  WifiScan = 0,
-  Waterfall = 1,
-  BleScan = 2,
-  Sys = 3,
-  Help = 4,
-  Count = 5
-};
+enum class Mode : uint8_t { Radio = 1, Totp = 4 };
+enum class RadioPage : uint8_t { WifiScan = 0, Waterfall = 1, BleScan = 2, Sys = 3, Help = 4, Count = 5 };
 enum class HistFace : uint8_t { Session = 0, Saved = 1 };
 
 static constexpr uint32_t kUiMs = 200;
@@ -50,21 +39,9 @@ struct App {
   GeekDisplay tft;
   GFXcanvas16 frame;
 
-  SW3518 charger;
-  SW3518::Snapshot snap;
-  Session session;
-  Session saved;
-  bool savedOk = false;
-
-#if HAS_MSC_STICK
-  Mode mode = Mode::Stick;
-#else
-  Mode mode = Mode::Charger;
-#endif
+  Mode mode = Mode::Totp;
   Page page = Page::Main;
   RadioPage radioPage = RadioPage::WifiScan;
-  HidTools::Page hidPage = HidTools::Page::Status;
-  uint8_t hidMacroIdx = 0;
   uint8_t nextFromMain = 0;
   Anim anim;
   HistFace histFace = HistFace::Session;
@@ -73,19 +50,14 @@ struct App {
   bool nightDim = false;
   int blLevel = kBlFull;
   uint32_t lastActivityMs = 0;
-  uint32_t protoFlashUntil = 0;
-  SW3518::Protocol lastProtocol = SW3518::Protocol::None;
 
   bool wifiEnabled = false;
   bool sdOk = false;
   bool webStarted = false;
   uint32_t lastWebHitMs = 0;
   uint32_t ipShowUntilMs = 0;
-  bool seenUsbC = false;
-  bool seenUsbA = false;
 
   uint32_t lastUiMs = 0;
-  uint32_t lastProbeMs = 0;
   uint32_t lastMqttMs = 0;
   uint32_t lastSdMs = 0;
   uint32_t lastBeatMs = 0;
